@@ -27,7 +27,7 @@ Single-pattern case expressions for destructuring are not allowed, as:
     type Opaque
         = Opaque Int
 
-    unpack : Opaque -> Opaque
+    unpack : Opaque -> Int
     unpack o =
         case o of
             Opaque i ->
@@ -35,7 +35,7 @@ Single-pattern case expressions for destructuring are not allowed, as:
 
 may instead be written more concisely as:
 
-    unpack : Opaque -> Opaque
+    unpack : Opaque -> Int
     unpack (Opaque i) =
         i
 

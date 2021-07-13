@@ -20,7 +20,7 @@ disallowed =
 
 type Opaque = Opaque Int
 
-unpack : Opaque -> Opaque
+unpack : Opaque -> Int
 unpack o =
     case o of
         Opaque i -> i

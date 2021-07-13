@@ -9,7 +9,7 @@
             "elm/core": "1.0.5",
             "jfmengels/elm-review": "2.5.0",
             "stil4m/elm-syntax": "7.2.5",
-            "SiriusStarr/elm-review-no-single-pattern-case": "1.0.0"
+            "SiriusStarr/elm-review-no-single-pattern-case": "1.0.1"
         },
         "indirect": {
             "elm/html": "1.0.0",

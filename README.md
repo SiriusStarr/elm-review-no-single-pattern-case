@@ -4,7 +4,7 @@ Provides [`elm-review`](https://package.elm-lang.org/packages/jfmengels/elm-revi
 
 ## Provided rules
 
-- [`NoSinglePatternCase`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/1.0.0/NoSinglePatternCase) - Reports `case...of` expressions that match only a single pattern.  Such case expressions are either unnecessary or may be written more concisely.
+* [`NoSinglePatternCase`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/1.0.1/NoSinglePatternCase) - Reports `case...of` expressions that match only a single pattern.  Such case expressions are either unnecessary or may be written more concisely.
 
 ## Configuration
 
@@ -27,3 +27,8 @@ You can try the example configuration above out by running the following command
 ```bash
 elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example
 ```
+
+## Changelog
+
+* 1.0.1 -- Fix minor documentation issue
+* 1.0.0 -- Initial release
