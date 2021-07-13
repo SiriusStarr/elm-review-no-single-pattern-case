@@ -74,7 +74,7 @@ to detect unnecessary multi-pattern cases.
 
 ## When (not) to enable this rule
 
-This rule is useful if you prefer destructuring in e.g. function arguments or
+This rule is useful if you prefer destructuring in function/lambda arguments or
 `let` bindings, rather than in a single-pattern case.
 
 This rule is not useful if you prefer the more verbose style.
