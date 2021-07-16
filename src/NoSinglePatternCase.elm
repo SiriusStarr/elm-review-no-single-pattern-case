@@ -16,7 +16,7 @@ import Elm.Syntax.Range exposing (Range)
 import Pretty exposing (pretty)
 import Review.Fix as Fix
 import Review.Rule as Rule exposing (Error, Rule)
-import SyntaxHelp exposing (collectVarsFromPattern, expressionsInExpression, parensAroundNamedPattern, variableUsageIn)
+import SyntaxHelp exposing (VarPatternKind(..), collectVarsFromPattern, expressionsInExpression, parensAroundNamedPattern, variableUsageIn)
 
 
 {-| Reports single-pattern case expressions, which may be written more concisely
@@ -126,11 +126,11 @@ checkDeclaration declaration =
 
 inScope :
     scope
-    -> { name : name, pattern : Pattern }
-    -> { name : name, pattern : Pattern, scope : scope }
-inScope scope { name, pattern } =
+    -> { name : name, kind : kind }
+    -> { name : name, kind : kind, scope : scope }
+inScope scope { name, kind } =
     { name = name
-    , pattern = pattern
+    , kind = kind
     , scope = scope
     }
 
@@ -142,7 +142,7 @@ checkEpression :
     ->
         List
             { name : Node String
-            , pattern : Pattern
+            , kind : VarPatternKind
             , scope : Expression
             }
     -> Node Expression
@@ -290,7 +290,7 @@ singlePatternCaseError :
     { patternVars :
         List
             { name : Node String
-            , pattern : Pattern
+            , kind : VarPatternKind
             , scope : Expression
             }
     , expressionInCaseOf : Expression
@@ -316,9 +316,9 @@ singlePatternCaseError { patternVars, expressionInCaseOf, singleCaseExpression, 
                             |> List.filter
                                 (.name >> Node.value >> (==) varName)
                     of
-                        { name, scope, pattern } :: _ ->
-                            case pattern of
-                                AsPattern _ _ ->
+                        { name, scope, kind } :: _ ->
+                            case kind of
+                                VarAfterAs ->
                                     letFix ()
 
                                 _ ->

@@ -1,4 +1,4 @@
-module SyntaxHelp exposing (collectVarsFromPattern, expressionsInExpression, parensAroundNamedPattern, variableUsageIn)
+module SyntaxHelp exposing (VarPatternKind(..), collectVarsFromPattern, expressionsInExpression, parensAroundNamedPattern, variableUsageIn)
 
 import Elm.CodeGen exposing (parensPattern, val)
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
@@ -11,25 +11,24 @@ import Elm.Syntax.Pattern exposing (Pattern(..))
 expressionsInExpression : Expression -> List (Node Expression)
 expressionsInExpression expression =
     let
-        collectRecordSetterExpressions =
+        expressionsInRecordSetters =
             List.map Node.value
                 >> List.map (\( _, expr ) -> expr)
     in
     case expression of
         LetExpression letBlock ->
-            letBlock.expression
-                :: (let
-                        expressionInLetDeclaration (Node _ letDeclaration) =
-                            case letDeclaration of
-                                LetFunction { declaration } ->
-                                    declaration |> Node.value |> .expression
+            let
+                expressionInLetDeclaration (Node _ letDeclaration) =
+                    case letDeclaration of
+                        LetFunction { declaration } ->
+                            declaration |> Node.value |> .expression
 
-                                LetDestructuring _ toDestructure ->
-                                    toDestructure
-                    in
-                    letBlock.declarations
-                        |> List.map expressionInLetDeclaration
-                   )
+                        LetDestructuring _ toDestructure ->
+                            toDestructure
+            in
+            letBlock.declarations
+                |> List.map expressionInLetDeclaration
+                |> (::) letBlock.expression
 
         ListExpr expressions ->
             expressions
@@ -38,11 +37,11 @@ expressionsInExpression expression =
             expressions
 
         RecordExpr setters ->
-            setters |> collectRecordSetterExpressions
+            setters |> expressionsInRecordSetters
 
         RecordUpdateExpression record updaters ->
             Node.map val record
-                :: (updaters |> collectRecordSetterExpressions)
+                :: (updaters |> expressionsInRecordSetters)
 
         Application expressions ->
             expressions
@@ -105,12 +104,39 @@ expressionsInExpression expression =
             []
 
 
+{-| There are places where only variable patterns can be, not any pattern:
+
+  - `VarAfterAs`: `(... as here)`
+  - `FieldPattern`: `{ here }`
+  - `SingleVarPattern`: `( here, _ )` or `Just here` or ...
+
+-}
+type VarPatternKind
+    = VarAfterAs
+    | FieldPattern
+    | SingleVarPattern
+
+
+{-| Recursively find all variable patterns in a pattern. Also save whether the variable is from after `as`.
+
+    somePattern =
+        TuplePattern
+            [ UnitPattern |> Node ...
+            , VarPattern "iAmHere" |> Node ...
+            ]
+
+    pattern
+        |> Node ...
+        |> collectVarsFromPattern
+    --> [ { name = "iAmHere", pattern = pattern } ]
+
+-}
 collectVarsFromPattern :
     Node Pattern
     ->
         List
             { name : Node String
-            , pattern : Pattern
+            , kind : VarPatternKind
             }
 collectVarsFromPattern pattern =
     let
@@ -118,9 +144,9 @@ collectVarsFromPattern pattern =
             List.concatMap
                 collectVarsFromPattern
 
-        withPattern varPattern =
+        ofKind kind varPattern =
             { name = varPattern
-            , pattern = Node.value pattern
+            , kind = kind
             }
     in
     case Node.value pattern of
@@ -131,7 +157,8 @@ collectVarsFromPattern pattern =
             subPatterns |> step
 
         RecordPattern fieldPatterns ->
-            fieldPatterns |> List.map withPattern
+            fieldPatterns
+                |> List.map (ofKind FieldPattern)
 
         NamedPattern _ subPatterns ->
             subPatterns |> step
@@ -141,12 +168,12 @@ collectVarsFromPattern pattern =
 
         VarPattern name ->
             [ Node (Node.range pattern) name
-                |> withPattern
+                |> ofKind SingleVarPattern
             ]
 
         AsPattern pattern_ afterAs ->
-            (afterAs |> withPattern)
-                :: ([ pattern_ ] |> step)
+            ([ pattern_ ] |> step)
+                |> (::) (afterAs |> ofKind VarAfterAs)
 
         ParenthesizedPattern innerPattern ->
             [ innerPattern ] |> step
