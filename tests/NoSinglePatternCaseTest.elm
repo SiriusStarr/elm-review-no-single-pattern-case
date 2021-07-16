@@ -114,7 +114,7 @@ unpack (Opaque i) =
                             ]
             ]
         , describe "can't replace argument"
-            [ test "because variable is used multiple times" <|
+            [ test "because the variable in case and of is used multiple times" <|
                 \() ->
                     """module A exposing (..)
 
@@ -141,7 +141,41 @@ unpack o =
     ( i, o )
 """
                             ]
-            , test "because between case and of isn't just a variable" <|
+            , test "lets are combined" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        (Opaque ii) =
+            o
+    in
+    case o of
+        Opaque i -> i
+"""
+                        |> Review.Test.run rule
+                        |> Review.Test.expectErrors
+                            [ error """case o of
+        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        (Opaque ii) =
+            o
+    
+        (Opaque i) =
+            o
+    in
+    i
+"""
+                            ]
+            , test "because in case and of isn't just a variable" <|
                 \() ->
                     """module A exposing (..)
 
@@ -168,7 +202,7 @@ unpack o =
     i
 """
                             ]
-            , test "because the variable between case and of is defined at top level" <|
+            , test "because the variable in case and of is defined at top level" <|
                 \() ->
                     """module A exposing (..)
 
@@ -203,7 +237,7 @@ unpack =
     i
 """
                             ]
-            , test "because the variable used between case and of is in a pattern after as" <|
+            , test "because the variable in case and of is in a pattern after as" <|
                 \() ->
                     """module A exposing (..)
 
