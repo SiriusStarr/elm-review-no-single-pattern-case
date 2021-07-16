@@ -113,8 +113,7 @@ checkDeclaration declaration =
                     fun.declaration
             in
             expression
-                |> checkEpression
-                    { letDirectlyBefore = Nothing }
+                |> checkEpression { letDirectlyBefore = Nothing }
                     (arguments
                         |> List.concatMap collectVarsFromPattern
                         |> List.map
@@ -127,8 +126,8 @@ checkDeclaration declaration =
 
 inScope :
     scope
-    -> { record | name : name, pattern : pattern }
-    -> { name : name, pattern : pattern, scope : scope }
+    -> { name : name, pattern : Pattern }
+    -> { name : name, pattern : Pattern, scope : scope }
 inScope scope { name, pattern } =
     { name = name
     , pattern = pattern
@@ -149,61 +148,32 @@ checkEpression :
     -> Node Expression
     -> List (Error {})
 checkEpression { letDirectlyBefore } vars expressionNode =
+    let
+        checkExpressionWithoutNewPatterns =
+            checkEpression { letDirectlyBefore = Nothing } vars
+    in
     case Node.value expressionNode of
         CaseExpression { cases, expression } ->
             case cases of
-                [ singleCase ] ->
+                [ ( Node _ singleCasePattern, Node _ singleCaseExpression ) ] ->
                     [ singlePatternError
                         { patternVars = vars
                         , expressionInCaseOf = expression
-                        , singleCase = singleCase
+                        , singleCasePattern = singleCasePattern
+                        , singleCaseExpression = singleCaseExpression
                         , letDirectlyBefore = letDirectlyBefore
-                        , caseRange = expressionNode |> Node.range
+                        , caseRange = Node.range expressionNode
                         }
                     ]
 
-                multipleCases ->
-                    multipleCases
+                _ ->
+                    cases
                         |> List.concatMap
                             (\( _, expr ) ->
-                                expr
-                                    |> checkEpression
-                                        { letDirectlyBefore = Nothing }
-                                        vars
+                                expr |> checkExpressionWithoutNewPatterns
                             )
 
         LetExpression letBlock ->
-            let
-                checkLetDeclaration letDeclaration =
-                    let
-                        inLetBlockScope =
-                            inScope (Node.value letBlock.expression)
-                    in
-                    case letDeclaration of
-                        LetFunction { declaration } ->
-                            let
-                                { expression, arguments } =
-                                    Node.value declaration
-                            in
-                            expression
-                                |> checkEpression
-                                    { letDirectlyBefore = Nothing }
-                                    (arguments
-                                        |> List.concatMap collectVarsFromPattern
-                                        |> List.map inLetBlockScope
-                                        |> (++) vars
-                                    )
-
-                        LetDestructuring destructuringPattern toDestructure ->
-                            toDestructure
-                                |> checkEpression
-                                    { letDirectlyBefore = Nothing }
-                                    (destructuringPattern
-                                        |> collectVarsFromPattern
-                                        |> List.map inLetBlockScope
-                                        |> (++) vars
-                                    )
-            in
             letBlock.expression
                 |> checkEpression
                     { letDirectlyBefore =
@@ -216,20 +186,35 @@ checkEpression { letDirectlyBefore } vars expressionNode =
                     }
                     vars
                 |> (++)
-                    (letBlock.declarations
+                    (let
+                        checkExpressionWithNewPatterns newPatterns =
+                            checkEpression { letDirectlyBefore = Nothing }
+                                (newPatterns
+                                    |> List.concatMap collectVarsFromPattern
+                                    |> List.map (inScope (Node.value letBlock.expression))
+                                    |> (++) vars
+                                )
+                     in
+                     letBlock.declarations
                         |> List.concatMap
-                            (Node.value
-                                >> checkLetDeclaration
+                            (\(Node _ letDeclaration) ->
+                                case letDeclaration of
+                                    LetFunction { declaration } ->
+                                        let
+                                            decl =
+                                                Node.value declaration
+                                        in
+                                        decl.expression
+                                            |> checkExpressionWithNewPatterns decl.arguments
+
+                                    LetDestructuring pattern expr ->
+                                        expr |> checkExpressionWithNewPatterns [ pattern ]
                             )
                     )
 
         otherExpression ->
             expressionsInExpression otherExpression
-                |> List.concatMap
-                    (checkEpression
-                        { letDirectlyBefore = Nothing }
-                        vars
-                    )
+                |> List.concatMap checkExpressionWithoutNewPatterns
 
 
 {-|
@@ -308,17 +293,15 @@ singlePatternError :
             , scope : Expression
             }
     , expressionInCaseOf : Node Expression
-    , singleCase : Case
+    , singleCasePattern : Pattern
+    , singleCaseExpression : Expression
     , letDirectlyBefore :
         Maybe { declarations : List LetDeclaration, range : Range }
     , caseRange : Range
     }
     -> Error {}
-singlePatternError { patternVars, expressionInCaseOf, singleCase, letDirectlyBefore, caseRange } =
+singlePatternError { patternVars, expressionInCaseOf, singleCaseExpression, singleCasePattern, letDirectlyBefore, caseRange } =
     let
-        ( Node _ casePattern, Node _ caseExpression ) =
-            singleCase
-
         fix =
             let
                 patternVarsWithoutAfterAs =
@@ -355,22 +338,23 @@ singlePatternError { patternVars, expressionInCaseOf, singleCase, letDirectlyBef
 
         replaceVarPatternFix varPattern =
             [ Fix.replaceRangeBy (Node.range varPattern)
-                (casePattern
+                (singleCasePattern
                     |> parensAroundNamedPattern
                     |> prettyPrintPattern
                 )
             , Fix.replaceRangeBy caseRange
-                (caseExpression |> prettyExpr caseRange)
+                (singleCaseExpression |> prettyExpr caseRange)
             ]
 
         letFix () =
-            [ let
+            let
                 fixUseless =
-                    caseExpression
+                    [ singleCaseExpression
                         |> prettyExpr caseRange
                         |> Fix.replaceRangeBy caseRange
-              in
-              case casePattern of
+                    ]
+            in
+            case singleCasePattern of
                 AllPattern ->
                     fixUseless
 
@@ -380,16 +364,17 @@ singlePatternError { patternVars, expressionInCaseOf, singleCase, letDirectlyBef
                 pattern ->
                     let
                         replaceWithLetBlock rangeToReplace { extraDeclarationsBefore } =
-                            letExpr
+                            [ letExpr
                                 (extraDeclarationsBefore
                                     ++ [ letDestructuring
                                             (pattern |> parensAroundNamedPattern)
                                             (expressionInCaseOf |> Node.value)
                                        ]
                                 )
-                                caseExpression
+                                singleCaseExpression
                                 |> prettyExpr rangeToReplace
                                 |> Fix.replaceRangeBy rangeToReplace
+                            ]
                     in
                     case letDirectlyBefore of
                         Just let_ ->
@@ -399,7 +384,6 @@ singlePatternError { patternVars, expressionInCaseOf, singleCase, letDirectlyBef
                         Nothing ->
                             replaceWithLetBlock caseRange
                                 { extraDeclarationsBefore = [] }
-            ]
     in
     Rule.errorWithFix
         { message = "Single pattern case block."
