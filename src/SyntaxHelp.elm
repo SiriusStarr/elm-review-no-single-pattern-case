@@ -1,12 +1,12 @@
-module SyntaxHelp exposing (collectVarsFromPattern, expressionsInExpression, parensAroundNamedPattern, variableUsageCountIn)
+module SyntaxHelp exposing (collectVarsFromPattern, expressionsInExpression, parensAroundNamedPattern, variableUsageIn)
 
-import Elm.CodeGen exposing (parensPattern)
+import Elm.CodeGen exposing (parensPattern, val)
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Pattern exposing (Pattern(..))
 
 
-{-| not recursive. Just the direct child expressions.
+{-| The direct child expressions.
 -}
 expressionsInExpression : Expression -> List (Node Expression)
 expressionsInExpression expression =
@@ -18,16 +18,17 @@ expressionsInExpression expression =
     case expression of
         LetExpression letBlock ->
             letBlock.expression
-                :: (letBlock.declarations
-                        |> List.map
-                            (\letDeclaration ->
-                                case Node.value letDeclaration of
-                                    LetFunction { declaration } ->
-                                        declaration |> Node.value |> .expression
+                :: (let
+                        expressionInLetDeclaration (Node _ letDeclaration) =
+                            case letDeclaration of
+                                LetFunction { declaration } ->
+                                    declaration |> Node.value |> .expression
 
-                                    LetDestructuring _ toDestructure ->
-                                        toDestructure
-                            )
+                                LetDestructuring _ toDestructure ->
+                                    toDestructure
+                    in
+                    letBlock.declarations
+                        |> List.map expressionInLetDeclaration
                    )
 
         ListExpr expressions ->
@@ -39,8 +40,9 @@ expressionsInExpression expression =
         RecordExpr setters ->
             setters |> collectRecordSetterExpressions
 
-        RecordUpdateExpression _ updaters ->
-            updaters |> collectRecordSetterExpressions
+        RecordUpdateExpression record updaters ->
+            Node.map val record
+                :: (updaters |> collectRecordSetterExpressions)
 
         Application expressions ->
             expressions
@@ -142,8 +144,8 @@ collectVarsFromPattern pattern =
                 |> withPattern
             ]
 
-        AsPattern pattern_ what ->
-            (what |> withPattern)
+        AsPattern pattern_ afterAs ->
+            (afterAs |> withPattern)
                 :: ([ pattern_ ] |> step)
 
         ParenthesizedPattern innerPattern ->
@@ -171,8 +173,10 @@ collectVarsFromPattern pattern =
             []
 
 
-variableUsageCountIn : Expression -> String -> number_
-variableUsageCountIn expression variable =
+{-| Count the uses of a given variable.
+-}
+variableUsageIn : Expression -> String -> number_
+variableUsageIn expression variable =
     case expression of
         FunctionOrValue [] var ->
             if var == variable then
@@ -185,7 +189,7 @@ variableUsageCountIn expression variable =
             expressionsInExpression expression
                 |> List.map
                     (\expr ->
-                        variableUsageCountIn
+                        variableUsageIn
                             (Node.value expr)
                             variable
                     )
