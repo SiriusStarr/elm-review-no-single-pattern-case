@@ -1,22 +1,9 @@
-module SyntaxHelp exposing (collectVarsFromPattern, expressionsInExpression, letDeclarationArguments, parensAroundNamedPattern, prettyPrintPattern, variableCountIn)
+module SyntaxHelp exposing (collectVarsFromPattern, expressionsInExpression, parensAroundNamedPattern, variableUsageCountIn)
 
 import Elm.CodeGen exposing (parensPattern)
-import Elm.Pretty exposing (prettyPattern)
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Pattern exposing (Pattern(..))
-import Elm.Syntax.TypeAnnotation exposing (TypeAnnotation(..))
-import Pretty exposing (pretty)
-
-
-letDeclarationArguments : LetDeclaration -> List (Node Pattern)
-letDeclarationArguments letDeclaration =
-    case letDeclaration of
-        LetFunction { declaration } ->
-            declaration |> Node.value |> .arguments
-
-        LetDestructuring pattern _ ->
-            [ pattern ]
 
 
 {-| not recursive. Just the direct child expressions.
@@ -151,7 +138,9 @@ collectVarsFromPattern pattern =
             [ headPattern, tailPattern ] |> step
 
         VarPattern name ->
-            [ name |> Node (Node.range pattern) |> withPattern ]
+            [ Node (Node.range pattern) name
+                |> withPattern
+            ]
 
         AsPattern pattern_ what ->
             (what |> withPattern)
@@ -182,8 +171,8 @@ collectVarsFromPattern pattern =
             []
 
 
-variableCountIn : Expression -> String -> number_
-variableCountIn expression variable =
+variableUsageCountIn : Expression -> String -> number_
+variableUsageCountIn expression variable =
     case expression of
         FunctionOrValue [] var ->
             if var == variable then
@@ -196,31 +185,35 @@ variableCountIn expression variable =
             expressionsInExpression expression
                 |> List.map
                     (\expr ->
-                        variableCountIn
+                        variableUsageCountIn
                             (Node.value expr)
                             variable
                     )
                 |> List.sum
 
 
+{-| `case of` patterns that look like
+
+    case opaque of
+        Opaque i ->
+            i
+
+can't be used like this in a let destructuring, lambda or argument:
+
+    function Opaque i =
+        i
+
+so run `parensAroundNamedPattern` to turn possible `NamedPattern`s into `ParenthesizedPattern`.
+
+    function (Opaque i) =
+        i
+
+-}
 parensAroundNamedPattern : Pattern -> Pattern
 parensAroundNamedPattern casePattern =
     case casePattern of
-        NamedPattern name patterns ->
-            parensPattern (NamedPattern name patterns)
+        NamedPattern _ _ ->
+            parensPattern casePattern
 
         _ ->
             casePattern
-
-
-{-| If you call `Elm.Pretty.prettyPattern` on `ParenthesizedPattern inner`, `inner` is the result.
-This method displays the actual `(inner)`.
--}
-prettyPrintPattern : Pattern -> String
-prettyPrintPattern pattern =
-    case pattern of
-        ParenthesizedPattern inParens ->
-            "(" ++ prettyPrintPattern (Node.value inParens) ++ ")"
-
-        _ ->
-            pattern |> prettyPattern |> pretty 120
