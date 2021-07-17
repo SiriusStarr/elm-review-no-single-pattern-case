@@ -329,7 +329,7 @@ unpack { o } =
     i
 """
                             ]
-            , test "because the variable in case and of is the name of a let function with a annotation" <|
+            , test "because the variable in case and of is the name of a let variable with an annotation" <|
                 \() ->
                     """module A exposing (..)
 
@@ -341,8 +341,7 @@ unpack oo =
         o : Opaque
         o =
             oo
-    in
-    let
+        
         unpacked =
             case o of
                 Opaque i -> i
