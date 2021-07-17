@@ -116,9 +116,9 @@ unpack (Opaque i) =
                 \() ->
                     """module A exposing (..)
 
-type Opaque = Opaque Int
+type Opaque a = Opaque a
 
-unpack : Opaque -> Int
+unpack : Opaque a -> a
 unpack ((Opaque ii) as oo) =
     let
         (Opaque o) =
@@ -135,9 +135,9 @@ unpack ((Opaque ii) as oo) =
                             [ error """case o of
                 Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
 
-type Opaque = Opaque Int
+type Opaque a = Opaque a
 
-unpack : Opaque -> Int
+unpack : Opaque a -> a
 unpack ((Opaque ii) as oo) =
     let
         (Opaque (Opaque i)) =
@@ -178,7 +178,7 @@ unpack o =
     ( i, o )
 """
                             ]
-            , test "lets are combined" <|
+            , test "lets are not combined" <|
                 \() ->
                     """module A exposing (..)
 
@@ -205,7 +205,8 @@ unpack o =
     let
         (Opaque ii) =
             o
-    
+    in
+    let
         (Opaque i) =
             o
     in
@@ -328,7 +329,7 @@ unpack { o } =
     i
 """
                             ]
-            , test "because the variable in case and of is the name of a let function with a annotation (+ joined lets)" <|
+            , test "because the variable in case and of is the name of a let function with a annotation" <|
                 \() ->
                     """module A exposing (..)
 
@@ -340,7 +341,8 @@ unpack oo =
         o : Opaque
         o =
             oo
-        
+    in
+    let
         unpacked =
             case o of
                 Opaque i -> i
@@ -360,7 +362,7 @@ unpack oo =
         o : Opaque
         o =
             oo
-        
+
         unpacked =
             let
                 (Opaque i) =

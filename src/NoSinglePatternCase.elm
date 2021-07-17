@@ -113,7 +113,7 @@ checkDeclaration declaration =
                     fun.declaration |> Node.value
             in
             expression
-                |> checkEpression { letDirectlyBefore = Nothing }
+                |> checkEpression
                     (arguments
                         |> List.concatMap allVarsInPattern
                         |> List.map
@@ -136,21 +136,17 @@ inScope scope { name, kind } =
 
 
 checkEpression :
-    { letDirectlyBefore :
-        Maybe { declarations : List LetDeclaration, range : Range }
-    }
-    ->
-        List
-            { name : Node String
-            , kind : VarPatternKind
-            , scope : Expression
-            }
+    List
+        { name : Node String
+        , kind : VarPatternKind
+        , scope : Expression
+        }
     -> Node Expression
     -> List (Error {})
-checkEpression { letDirectlyBefore } vars expressionNode =
+checkEpression vars expressionNode =
     let
-        checkExpressionHere letDirectlyBefore_ extraPatterns =
-            checkEpression letDirectlyBefore_
+        checkExpressionHere extraPatterns =
+            checkEpression
                 (extraPatterns
                     |> List.map (inScope (Node.value expressionNode))
                     |> (++) vars
@@ -166,7 +162,6 @@ checkEpression { letDirectlyBefore } vars expressionNode =
                             caseBlock.expression |> Node.value
                         , singleCasePattern = singleCasePattern
                         , singleCaseExpression = singleCaseExpression
-                        , letDirectlyBefore = letDirectlyBefore
                         , caseRange = Node.range expressionNode
                         }
                     ]
@@ -176,9 +171,7 @@ checkEpression { letDirectlyBefore } vars expressionNode =
                         |> List.concatMap
                             (\( _, expr ) ->
                                 expr
-                                    |> checkExpressionHere
-                                        { letDirectlyBefore = Nothing }
-                                        []
+                                    |> checkExpressionHere []
                             )
 
         LetExpression letBlock ->
@@ -220,7 +213,6 @@ checkEpression { letDirectlyBefore } vars expressionNode =
                             in
                             declaration.expression
                                 |> checkExpressionHere
-                                    { letDirectlyBefore = Nothing }
                                     (newVarsInLetBlock
                                         ++ (declaration.arguments
                                                 |> List.concatMap allVarsInPattern
@@ -229,27 +221,15 @@ checkEpression { letDirectlyBefore } vars expressionNode =
 
                         LetDestructuring _ expr ->
                             expr
-                                |> checkExpressionHere
-                                    { letDirectlyBefore = Nothing }
-                                    newVarsInLetBlock
+                                |> checkExpressionHere newVarsInLetBlock
             in
             letBlock.expression
-                |> checkExpressionHere
-                    { letDirectlyBefore =
-                        { declarations =
-                            letBlock.declarations
-                                |> List.map Node.value
-                        , range = Node.range expressionNode
-                        }
-                            |> Just
-                    }
-                    []
+                |> checkExpressionHere []
                 |> (++) checkDeclarations
 
         otherExpression ->
             expressionsInExpression otherExpression
-                |> List.concatMap
-                    (checkEpression { letDirectlyBefore = Nothing } vars)
+                |> List.concatMap (checkExpressionHere [])
 
 
 {-| An error for when a case expression only contains one case pattern.
@@ -318,10 +298,11 @@ the resulting `let`s
     in
     i
 
-are joined into one.
+are not joined into one because of situations like
 
     let
-        something =
+        --        ↓ name clash
+        something i =
             alsoUse o
 
         (Opaque i) =
@@ -340,12 +321,10 @@ singlePatternCaseError :
     , expressionInCaseOf : Expression
     , singleCasePattern : Pattern
     , singleCaseExpression : Expression
-    , letDirectlyBefore :
-        Maybe { declarations : List LetDeclaration, range : Range }
     , caseRange : Range
     }
     -> Error {}
-singlePatternCaseError { patternVars, expressionInCaseOf, singleCaseExpression, singleCasePattern, letDirectlyBefore, caseRange } =
+singlePatternCaseError { patternVars, expressionInCaseOf, singleCaseExpression, singleCasePattern, caseRange } =
     let
         info =
             { message = "Single pattern case block."
@@ -411,28 +390,15 @@ singlePatternCaseError { patternVars, expressionInCaseOf, singleCaseExpression, 
                     fixUseless
 
                 pattern ->
-                    let
-                        replaceWithLetBlock rangeToReplace { extraDeclarationsBefore } =
-                            [ letExpr
-                                (extraDeclarationsBefore
-                                    ++ [ letDestructuring
-                                            (pattern |> parensAroundNamedPattern)
-                                            expressionInCaseOf
-                                       ]
-                                )
-                                singleCaseExpression
-                                |> prettyExpr rangeToReplace
-                                |> Fix.replaceRangeBy rangeToReplace
-                            ]
-                    in
-                    case letDirectlyBefore of
-                        Just let_ ->
-                            replaceWithLetBlock let_.range
-                                { extraDeclarationsBefore = let_.declarations }
-
-                        Nothing ->
-                            replaceWithLetBlock caseRange
-                                { extraDeclarationsBefore = [] }
+                    [ letExpr
+                        [ letDestructuring
+                            (pattern |> parensAroundNamedPattern)
+                            expressionInCaseOf
+                        ]
+                        singleCaseExpression
+                        |> prettyExpr caseRange
+                        |> Fix.replaceRangeBy caseRange
+                    ]
     in
     Rule.errorWithFix info caseRange fix
 
