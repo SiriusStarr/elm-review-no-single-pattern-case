@@ -6,7 +6,7 @@ module NoSinglePatternCase exposing (rule)
 
 -}
 
-import Elm.CodeGen exposing (letDestructuring, letExpr)
+import Elm.CodeGen exposing (letDestructuring, letExpr, val, varPattern)
 import Elm.Pretty exposing (prettyExpression, prettyPattern)
 import Elm.Syntax.Declaration exposing (Declaration(..))
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
@@ -16,7 +16,7 @@ import Elm.Syntax.Range exposing (Range)
 import Pretty exposing (pretty)
 import Review.Fix as Fix
 import Review.Rule as Rule exposing (Error, Rule)
-import SyntaxHelp exposing (VarPatternKind(..), collectVarsFromPattern, expressionsInExpression, parensAroundNamedPattern, variableUsageIn)
+import SyntaxHelp exposing (VarPatternKind(..), allVarsInPattern, expressionsInExpression, parensAroundNamedPattern, usesIn)
 
 
 {-| Reports single-pattern case expressions, which may be written more concisely
@@ -115,7 +115,7 @@ checkDeclaration declaration =
             expression
                 |> checkEpression { letDirectlyBefore = Nothing }
                     (arguments
-                        |> List.concatMap collectVarsFromPattern
+                        |> List.concatMap allVarsInPattern
                         |> List.map
                             (inScope (Node.value expression))
                     )
@@ -149,16 +149,21 @@ checkEpression :
     -> List (Error {})
 checkEpression { letDirectlyBefore } vars expressionNode =
     let
-        checkExpressionWithoutNewPatterns =
-            checkEpression { letDirectlyBefore = Nothing } vars
+        checkExpressionHere letDirectlyBefore_ extraPatterns =
+            checkEpression letDirectlyBefore_
+                (extraPatterns
+                    |> List.map (inScope (Node.value expressionNode))
+                    |> (++) vars
+                )
     in
     case Node.value expressionNode of
-        CaseExpression { cases, expression } ->
-            case cases of
+        CaseExpression caseBlock ->
+            case caseBlock.cases of
                 [ ( Node _ singleCasePattern, Node _ singleCaseExpression ) ] ->
                     [ singlePatternCaseError
                         { patternVars = vars
-                        , expressionInCaseOf = expression |> Node.value
+                        , expressionInCaseOf =
+                            caseBlock.expression |> Node.value
                         , singleCasePattern = singleCasePattern
                         , singleCaseExpression = singleCaseExpression
                         , letDirectlyBefore = letDirectlyBefore
@@ -166,42 +171,70 @@ checkEpression { letDirectlyBefore } vars expressionNode =
                         }
                     ]
 
-                _ ->
-                    cases
+                multipleCases ->
+                    multipleCases
                         |> List.concatMap
                             (\( _, expr ) ->
-                                expr |> checkExpressionWithoutNewPatterns
+                                expr
+                                    |> checkExpressionHere
+                                        { letDirectlyBefore = Nothing }
+                                        []
                             )
 
         LetExpression letBlock ->
             let
-                checkExpressionWithNewPatterns newPatterns =
-                    checkEpression { letDirectlyBefore = Nothing }
-                        (newPatterns
-                            |> List.concatMap collectVarsFromPattern
-                            |> List.map (inScope (Node.value letBlock.expression))
-                            |> (++) vars
-                        )
-
-                checkDeclarations =
+                newVarsInLetBlock =
                     letBlock.declarations
                         |> List.concatMap
                             (\(Node _ letDeclaration) ->
                                 case letDeclaration of
-                                    LetFunction { declaration } ->
-                                        let
-                                            decl =
-                                                Node.value declaration
-                                        in
-                                        decl.expression
-                                            |> checkExpressionWithNewPatterns decl.arguments
+                                    LetDestructuring pattern _ ->
+                                        pattern |> allVarsInPattern
 
-                                    LetDestructuring pattern expr ->
-                                        expr |> checkExpressionWithNewPatterns [ pattern ]
+                                    LetFunction fun ->
+                                        [ { name =
+                                                fun.declaration
+                                                    |> Node.value
+                                                    |> .name
+                                          , kind =
+                                                case fun.signature of
+                                                    Just _ ->
+                                                        AnnotatedLetVar
+
+                                                    Nothing ->
+                                                        SingleVarPattern
+                                          }
+                                        ]
                             )
+
+                checkDeclarations =
+                    letBlock.declarations
+                        |> List.concatMap checkLetDeclaration
+
+                checkLetDeclaration (Node _ letDeclaration) =
+                    case letDeclaration of
+                        LetFunction fun ->
+                            let
+                                declaration =
+                                    fun.declaration |> Node.value
+                            in
+                            declaration.expression
+                                |> checkExpressionHere
+                                    { letDirectlyBefore = Nothing }
+                                    (newVarsInLetBlock
+                                        ++ (declaration.arguments
+                                                |> List.concatMap allVarsInPattern
+                                           )
+                                    )
+
+                        LetDestructuring _ expr ->
+                            expr
+                                |> checkExpressionHere
+                                    { letDirectlyBefore = Nothing }
+                                    newVarsInLetBlock
             in
             letBlock.expression
-                |> checkEpression
+                |> checkExpressionHere
                     { letDirectlyBefore =
                         { declarations =
                             letBlock.declarations
@@ -210,12 +243,13 @@ checkEpression { letDirectlyBefore } vars expressionNode =
                         }
                             |> Just
                     }
-                    vars
+                    []
                 |> (++) checkDeclarations
 
         otherExpression ->
             expressionsInExpression otherExpression
-                |> List.concatMap checkExpressionWithoutNewPatterns
+                |> List.concatMap
+                    (checkEpression { letDirectlyBefore = Nothing } vars)
 
 
 {-| An error for when a case expression only contains one case pattern.
@@ -231,9 +265,16 @@ If
 
   - the variable was defined in a pattern (e.g. an argument), for example not
 
-        import Somewhere exposing (o)
+        import Somewhere exposing (imported)
+        case imported of
 
-        case o of
+        topLevel : Opaque
+        case topLevel of
+
+        let
+            withAnnotation : Opaque
+        in
+        case withAnnotation of
 
   - the variable is only used there, for example not
 
@@ -243,9 +284,12 @@ If
         in
         case o of
 
-  - the variable isn't after `as`, for example not
+  - the variable isn't a record field or after `as`, for example not
 
         unpack ((Opaque i) as o) =
+            case o of
+
+        unpack { o } =
             case o of
 
 then the fix is: Replace its variable pattern with the pattern used in the case.
@@ -318,15 +362,22 @@ singlePatternCaseError { patternVars, expressionInCaseOf, singleCaseExpression, 
                     of
                         { name, scope, kind } :: _ ->
                             case kind of
+                                SingleVarPattern ->
+                                    case usesIn scope (val (name |> Node.value)) of
+                                        1 ->
+                                            replaceVarPatternFix name
+
+                                        _ ->
+                                            letFix ()
+
                                 VarAfterAs ->
                                     letFix ()
 
-                                _ ->
-                                    if variableUsageIn scope (Node.value name) == 1 then
-                                        replaceVarPatternFix name
+                                FieldPattern ->
+                                    letFix ()
 
-                                    else
-                                        letFix ()
+                                AnnotatedLetVar ->
+                                    letFix ()
 
                         _ ->
                             letFix ()
@@ -395,8 +446,8 @@ prettyExpr replacedRange =
 
 adaptIndentation : Range -> String -> String
 adaptIndentation previousRange =
+    -- hacky but works
     let
-        -- hacky but works
         indentation =
             previousRange.start.column - 1
     in
@@ -411,8 +462,8 @@ This method displays the actual `(inner)`.
 prettyPrintPattern : Pattern -> String
 prettyPrintPattern pattern =
     case pattern of
-        ParenthesizedPattern inParens ->
-            "(" ++ prettyPrintPattern (Node.value inParens) ++ ")"
+        ParenthesizedPattern (Node _ inParens) ->
+            "(" ++ (inParens |> prettyPrintPattern) ++ ")"
 
         _ ->
             pattern |> prettyPattern |> pretty 120

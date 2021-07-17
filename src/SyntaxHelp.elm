@@ -1,4 +1,4 @@
-module SyntaxHelp exposing (VarPatternKind(..), collectVarsFromPattern, expressionsInExpression, parensAroundNamedPattern, variableUsageIn)
+module SyntaxHelp exposing (VarPatternKind(..), allVarsInPattern, expressionsInExpression, parensAroundNamedPattern, usesIn)
 
 import Elm.CodeGen exposing (parensPattern, val)
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
@@ -12,8 +12,7 @@ expressionsInExpression : Expression -> List (Node Expression)
 expressionsInExpression expression =
     let
         expressionsInRecordSetters =
-            List.map Node.value
-                >> List.map (\( _, expr ) -> expr)
+            List.map (\(Node _ ( _, expr )) -> expr)
     in
     case expression of
         LetExpression letBlock ->
@@ -107,13 +106,24 @@ expressionsInExpression expression =
 {-| There are places where only variable patterns can be, not any pattern:
 
   - `VarAfterAs`: `(... as here)`
+
   - `FieldPattern`: `{ here }`
+
+  - `AnnotatedLetVar`:
+
+        let ... : ...
+            here = ...
+        in
+
+Here, it can be any pattern:
+
   - `SingleVarPattern`: `( here, _ )` or `Just here` or ...
 
 -}
 type VarPatternKind
     = VarAfterAs
     | FieldPattern
+    | AnnotatedLetVar
     | SingleVarPattern
 
 
@@ -131,18 +141,18 @@ type VarPatternKind
     --> [ { name = "iAmHere", pattern = pattern } ]
 
 -}
-collectVarsFromPattern :
+allVarsInPattern :
     Node Pattern
     ->
         List
             { name : Node String
             , kind : VarPatternKind
             }
-collectVarsFromPattern pattern =
+allVarsInPattern pattern =
     let
         step =
             List.concatMap
-                collectVarsFromPattern
+                allVarsInPattern
 
         ofKind kind varPattern =
             { name = varPattern
@@ -202,25 +212,16 @@ collectVarsFromPattern pattern =
 
 {-| Count the uses of a given variable.
 -}
-variableUsageIn : Expression -> String -> number_
-variableUsageIn expression variable =
-    case expression of
-        FunctionOrValue [] var ->
-            if var == variable then
-                1
+usesIn : Expression -> Expression -> number_
+usesIn expression toMatch =
+    if expression == toMatch then
+        1
 
-            else
-                0
-
-        _ ->
-            expressionsInExpression expression
-                |> List.map
-                    (\expr ->
-                        variableUsageIn
-                            (Node.value expr)
-                            variable
-                    )
-                |> List.sum
+    else
+        expressionsInExpression expression
+            |> List.map
+                (\(Node _ expr) -> usesIn expr toMatch)
+            |> List.sum
 
 
 {-| `case of` patterns that look like
@@ -231,12 +232,12 @@ variableUsageIn expression variable =
 
 can't be used like this in a let destructuring, lambda or argument:
 
-    function Opaque i =
+    unpack Opaque i =
         i
 
 so run `parensAroundNamedPattern` to turn possible `NamedPattern`s into `ParenthesizedPattern`.
 
-    function (Opaque i) =
+    unpack (Opaque i) =
         i
 
 -}

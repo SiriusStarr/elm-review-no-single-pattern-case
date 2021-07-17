@@ -112,6 +112,43 @@ unpack (Opaque i) =
     i
 """
                             ]
+            , test "var pattern in destructuring let" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack ((Opaque ii) as oo) =
+    let
+        (Opaque o) =
+            Opaque oo
+
+        subUnpack =
+            case o of
+                Opaque i -> i
+    in
+    subUnpack
+"""
+                        |> Review.Test.run rule
+                        |> Review.Test.expectErrors
+                            [ error """case o of
+                Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack ((Opaque ii) as oo) =
+    let
+        (Opaque (Opaque i)) =
+            Opaque oo
+
+        subUnpack =
+            i
+    in
+    subUnpack
+"""
+                            ]
             ]
         , describe "can't replace argument"
             [ test "because the variable in case and of is used multiple times" <|
@@ -237,7 +274,7 @@ unpack =
     i
 """
                             ]
-            , test "because the variable in case and of is in a pattern after as" <|
+            , test "because the variable in case and of is from a pattern after as" <|
                 \() ->
                     """module A exposing (..)
 
@@ -262,6 +299,76 @@ unpack ((Opaque ii) as o) =
             o
     in
     i
+"""
+                            ]
+            , test "because the variable in case and of is from a record field pattern" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : { o : Opaque } -> Int
+unpack { o } =
+    case o of
+        Opaque i -> i
+"""
+                        |> Review.Test.run rule
+                        |> Review.Test.expectErrors
+                            [ error """case o of
+        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : { o : Opaque } -> Int
+unpack { o } =
+    let
+        (Opaque i) =
+            o
+    in
+    i
+"""
+                            ]
+            , test "because the variable in case and of is the name of a let function with a annotation (+ joined lets)" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack oo =
+    let
+        o : Opaque
+        o =
+            oo
+        
+        unpacked =
+            case o of
+                Opaque i -> i
+    in
+    unpacked
+"""
+                        |> Review.Test.run rule
+                        |> Review.Test.expectErrors
+                            [ error """case o of
+                Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack oo =
+    let
+        o : Opaque
+        o =
+            oo
+        
+        unpacked =
+            let
+                (Opaque i) =
+                    o
+            in
+            i
+    in
+    unpacked
 """
                             ]
             ]
