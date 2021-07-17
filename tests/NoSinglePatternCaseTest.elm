@@ -157,8 +157,8 @@ unpack ((Opaque ii) as oo) =
 
 type Opaque = Opaque Int
 
-unpack : Opaque -> ( Int, Opaque )
-unpack o =
+withUnpacked : Opaque -> ( Int, Opaque )
+withUnpacked o =
     case o of
         Opaque i -> ( i, o )
 """
@@ -169,8 +169,8 @@ unpack o =
 
 type Opaque = Opaque Int
 
-unpack : Opaque -> ( Int, Opaque )
-unpack o =
+withUnpacked : Opaque -> ( Int, Opaque )
+withUnpacked o =
     let
         (Opaque i) =
             o
@@ -250,8 +250,8 @@ topLevel =
 
 type Opaque = Opaque Int
 
-unpack : Int
-unpack =
+unpacked : Int
+unpacked =
     case topLevel of
         Opaque i -> i
 """
@@ -266,8 +266,8 @@ topLevel =
 
 type Opaque = Opaque Int
 
-unpack : Int
-unpack =
+unpacked : Int
+unpacked =
     let
         (Opaque i) =
             topLevel
