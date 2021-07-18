@@ -341,7 +341,7 @@ unpack oo =
         o : Opaque
         o =
             oo
-        
+
         unpacked =
             case o of
                 Opaque i -> i
