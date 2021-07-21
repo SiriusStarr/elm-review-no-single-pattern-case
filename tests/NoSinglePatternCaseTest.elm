@@ -372,6 +372,37 @@ unpack oo =
     unpacked
 """
                             ]
+            , test "because there's a var pattern outside has the same name as in the case pattern" <|
+                \() ->
+                    """module A exposing (..)
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        something i =
+            use i
+    in
+    case o of
+        Opaque i -> i
+"""
+                        |> Review.Test.run rule
+                        |> Review.Test.expectErrors
+                            [ error """case o of
+        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        something i =
+            use i
+    in
+    let
+        (Opaque i) =
+            o
+    in
+    i
+"""
+                            ]
             ]
         ]
 
