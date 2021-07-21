@@ -4,6 +4,7 @@ import Elm.CodeGen exposing (parensPattern, val)
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Pattern exposing (Pattern(..))
+import Elm.Syntax.Range exposing (Range)
 
 
 {-| The direct child expressions.
@@ -145,7 +146,8 @@ allVarsInPattern :
     Node Pattern
     ->
         List
-            { name : Node String
+            { name : String
+            , nameRange : Range
             , kind : VarPatternKind
             }
 allVarsInPattern pattern =
@@ -155,7 +157,8 @@ allVarsInPattern pattern =
                 allVarsInPattern
 
         ofKind kind varPattern =
-            { name = varPattern
+            { name = Node.value varPattern
+            , nameRange = Node.range varPattern
             , kind = kind
             }
     in
@@ -177,8 +180,10 @@ allVarsInPattern pattern =
             [ headPattern, tailPattern ] |> step
 
         VarPattern name ->
-            [ Node (Node.range pattern) name
-                |> ofKind SingleVarPattern
+            [ { name = name
+              , nameRange = Node.range pattern
+              , kind = SingleVarPattern
+              }
             ]
 
         AsPattern pattern_ afterAs ->
@@ -210,18 +215,23 @@ allVarsInPattern pattern =
             []
 
 
-{-| Count the uses of a given variable.
+{-| Count the uses of a given name (defined variables with this name) in the scope of the expression.
 -}
-usesIn : Expression -> Expression -> number_
+usesIn : Expression -> String -> number_
 usesIn expression toMatch =
-    if expression == toMatch then
-        1
+    case expression of
+        FunctionOrValue _ name ->
+            if name == toMatch then
+                1
 
-    else
-        expressionsInExpression expression
-            |> List.map
-                (\(Node _ expr) -> usesIn expr toMatch)
-            |> List.sum
+            else
+                0
+
+        _ ->
+            expressionsInExpression expression
+                |> List.map
+                    (\(Node _ expr) -> usesIn expr toMatch)
+                |> List.sum
 
 
 {-| `case of` patterns that look like

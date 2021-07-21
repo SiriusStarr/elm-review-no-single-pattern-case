@@ -126,10 +126,11 @@ checkDeclaration declaration =
 
 inScope :
     scope
-    -> { name : name, kind : kind }
-    -> { name : name, kind : kind, scope : scope }
-inScope scope { name, kind } =
+    -> { name : name, nameRange : Range, kind : kind }
+    -> { name : name, nameRange : Range, kind : kind, scope : scope }
+inScope scope { name, nameRange, kind } =
     { name = name
+    , nameRange = nameRange
     , kind = kind
     , scope = scope
     }
@@ -137,7 +138,8 @@ inScope scope { name, kind } =
 
 checkEpression :
     List
-        { name : Node String
+        { name : String
+        , nameRange : Range
         , kind : VarPatternKind
         , scope : Expression
         }
@@ -155,7 +157,7 @@ checkEpression vars expressionNode =
     case Node.value expressionNode of
         CaseExpression caseBlock ->
             case caseBlock.cases of
-                [ ( Node _ singleCasePattern, Node _ singleCaseExpression ) ] ->
+                [ ( singleCasePattern, Node _ singleCaseExpression ) ] ->
                     [ singlePatternCaseError
                         { patternVars = vars
                         , expressionInCaseOf =
@@ -170,35 +172,36 @@ checkEpression vars expressionNode =
                     multipleCases
                         |> List.concatMap
                             (\( _, expr ) ->
-                                expr
-                                    |> checkExpressionHere []
+                                expr |> checkExpressionHere []
                             )
 
         LetExpression letBlock ->
             let
+                newVarsInLetDeclaration (Node _ letDeclaration) =
+                    case letDeclaration of
+                        LetDestructuring pattern _ ->
+                            pattern |> allVarsInPattern
+
+                        LetFunction fun ->
+                            let
+                                declaration =
+                                    fun.declaration |> Node.value
+                            in
+                            { name = declaration.name |> Node.value
+                            , nameRange = declaration.name |> Node.range
+                            , kind =
+                                case fun.signature of
+                                    Just _ ->
+                                        AnnotatedLetVar
+
+                                    Nothing ->
+                                        SingleVarPattern
+                            }
+                                |> List.singleton
+
                 newVarsInLetBlock =
                     letBlock.declarations
-                        |> List.concatMap
-                            (\(Node _ letDeclaration) ->
-                                case letDeclaration of
-                                    LetDestructuring pattern _ ->
-                                        pattern |> allVarsInPattern
-
-                                    LetFunction fun ->
-                                        [ { name =
-                                                fun.declaration
-                                                    |> Node.value
-                                                    |> .name
-                                          , kind =
-                                                case fun.signature of
-                                                    Just _ ->
-                                                        AnnotatedLetVar
-
-                                                    Nothing ->
-                                                        SingleVarPattern
-                                          }
-                                        ]
-                            )
+                        |> List.concatMap newVarsInLetDeclaration
 
                 checkDeclarations =
                     letBlock.declarations
@@ -220,8 +223,7 @@ checkEpression vars expressionNode =
                                     )
 
                         LetDestructuring _ expr ->
-                            expr
-                                |> checkExpressionHere newVarsInLetBlock
+                            expr |> checkExpressionHere newVarsInLetBlock
             in
             letBlock.expression
                 |> checkExpressionHere []
@@ -314,12 +316,13 @@ are not joined into one because of situations like
 singlePatternCaseError :
     { patternVars :
         List
-            { name : Node String
+            { name : String
+            , nameRange : Range
             , kind : VarPatternKind
             , scope : Expression
             }
     , expressionInCaseOf : Expression
-    , singleCasePattern : Pattern
+    , singleCasePattern : Node Pattern
     , singleCaseExpression : Expression
     , caseRange : Range
     }
@@ -337,36 +340,51 @@ singlePatternCaseError { patternVars, expressionInCaseOf, singleCaseExpression, 
                     case
                         patternVars
                             |> List.filter
-                                (.name >> Node.value >> (==) varName)
+                                (.name >> (==) varName)
                     of
-                        { name, scope, kind } :: _ ->
-                            case kind of
+                        varPatternInCaseOf :: _ ->
+                            case varPatternInCaseOf.kind of
                                 SingleVarPattern ->
-                                    case usesIn scope (val (name |> Node.value)) of
+                                    case
+                                        usesIn varPatternInCaseOf.scope
+                                            varPatternInCaseOf.name
+                                    of
                                         1 ->
-                                            replaceVarPatternFix name
+                                            if
+                                                allVarsInPattern singleCasePattern
+                                                    |> List.all
+                                                        (.name
+                                                            >> usesIn varPatternInCaseOf.scope
+                                                            >> (==) 1
+                                                        )
+                                            then
+                                                replaceVarPatternFix varPatternInCaseOf.nameRange
+
+                                            else
+                                                fixWithSeperateLet ()
 
                                         _ ->
-                                            letFix ()
+                                            fixWithSeperateLet ()
 
                                 VarAfterAs ->
-                                    letFix ()
+                                    fixWithSeperateLet ()
 
                                 FieldPattern ->
-                                    letFix ()
+                                    fixWithSeperateLet ()
 
                                 AnnotatedLetVar ->
-                                    letFix ()
+                                    fixWithSeperateLet ()
 
                         _ ->
-                            letFix ()
+                            fixWithSeperateLet ()
 
                 _ ->
-                    letFix ()
+                    fixWithSeperateLet ()
 
-        replaceVarPatternFix varPattern =
-            [ Fix.replaceRangeBy (Node.range varPattern)
+        replaceVarPatternFix varRange =
+            [ Fix.replaceRangeBy varRange
                 (singleCasePattern
+                    |> Node.value
                     |> parensAroundNamedPattern
                     |> prettyPrintPattern
                 )
@@ -374,7 +392,7 @@ singlePatternCaseError { patternVars, expressionInCaseOf, singleCaseExpression, 
                 (singleCaseExpression |> prettyExpr caseRange)
             ]
 
-        letFix () =
+        fixWithSeperateLet () =
             let
                 fixUseless =
                     [ singleCaseExpression
@@ -382,7 +400,7 @@ singlePatternCaseError { patternVars, expressionInCaseOf, singleCaseExpression, 
                         |> Fix.replaceRangeBy caseRange
                     ]
             in
-            case singleCasePattern of
+            case singleCasePattern |> Node.value of
                 AllPattern ->
                     fixUseless
 
