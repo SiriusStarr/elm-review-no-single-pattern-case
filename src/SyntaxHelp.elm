@@ -1,4 +1,4 @@
-module SyntaxHelp exposing (VarPatternKind(..), allVarsInPattern, expressionsInExpression, parensAroundNamedPattern, usesIn)
+module SyntaxHelp exposing (VarPatternKind(..), allVarsInPattern, expressionsInExpression, parensAroundNamedPattern, updateExpressionsInExpression, usesIn)
 
 import Elm.CodeGen exposing (parensPattern, val)
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
@@ -102,6 +102,141 @@ expressionsInExpression expression =
 
         PrefixOperator _ ->
             []
+
+
+updateExpressionsInExpression : (Expression -> Expression) -> Expression -> Expression
+updateExpressionsInExpression update expression =
+    let
+        updateExpressionsInRecordSetters =
+            List.map
+                (Node.map
+                    (\( field, expr ) ->
+                        ( field, expr |> Node.map update )
+                    )
+                )
+    in
+    case expression of
+        LetExpression letBlock ->
+            let
+                updateExpressionInLetDeclaration letDeclaration =
+                    case letDeclaration of
+                        LetFunction fun ->
+                            LetFunction
+                                { fun
+                                    | declaration =
+                                        fun.declaration
+                                            |> Node.map
+                                                (\f ->
+                                                    { f
+                                                        | expression =
+                                                            f.expression
+                                                                |> Node.map update
+                                                    }
+                                                )
+                                }
+
+                        LetDestructuring pattern toDestructure ->
+                            LetDestructuring pattern (toDestructure |> Node.map update)
+            in
+            LetExpression
+                { declarations =
+                    letBlock.declarations
+                        |> List.map
+                            (Node.map updateExpressionInLetDeclaration)
+                , expression =
+                    letBlock.expression |> Node.map update
+                }
+
+        ListExpr expressions ->
+            ListExpr
+                (expressions |> List.map (Node.map update))
+
+        TupledExpression expressions ->
+            TupledExpression
+                (expressions |> List.map (Node.map update))
+
+        RecordExpr setters ->
+            RecordExpr
+                (setters |> updateExpressionsInRecordSetters)
+
+        RecordUpdateExpression record updaters ->
+            RecordUpdateExpression record
+                (updaters |> updateExpressionsInRecordSetters)
+
+        Application expressions ->
+            Application (expressions |> List.map (Node.map update))
+
+        CaseExpression caseBlock ->
+            CaseExpression
+                { expression = caseBlock.expression |> Node.map update
+                , cases =
+                    caseBlock.cases
+                        |> List.map
+                            (\( pattern, expr ) ->
+                                ( pattern, expr |> Node.map update )
+                            )
+                }
+
+        OperatorApplication name dir aExpr bExpr ->
+            OperatorApplication name
+                dir
+                (aExpr |> Node.map update)
+                (bExpr |> Node.map update)
+
+        IfBlock boolExpr thenExpr elseExpr ->
+            IfBlock (boolExpr |> Node.map update)
+                (thenExpr |> Node.map update)
+                (elseExpr |> Node.map update)
+
+        LambdaExpression lambda ->
+            LambdaExpression
+                { lambda
+                    | expression =
+                        lambda.expression
+                            |> Node.map update
+                }
+
+        RecordAccess record fieldName ->
+            RecordAccess (record |> Node.map update) fieldName
+
+        ParenthesizedExpression expr ->
+            ParenthesizedExpression (expr |> Node.map update)
+
+        Negation expr ->
+            Negation (expr |> Node.map update)
+
+        UnitExpr ->
+            expression
+
+        Integer _ ->
+            expression
+
+        Hex _ ->
+            expression
+
+        Floatable _ ->
+            expression
+
+        Literal _ ->
+            expression
+
+        CharLiteral _ ->
+            expression
+
+        GLSLExpression _ ->
+            expression
+
+        RecordAccessFunction _ ->
+            expression
+
+        FunctionOrValue _ _ ->
+            expression
+
+        Operator _ ->
+            expression
+
+        PrefixOperator _ ->
+            expression
 
 
 {-| There are places where only variable patterns can be, not any pattern:
@@ -218,10 +353,10 @@ allVarsInPattern pattern =
 {-| Count the uses of a given name (defined variables with this name) in the scope of the expression.
 -}
 usesIn : Expression -> String -> number_
-usesIn expression toMatch =
+usesIn expression matchName =
     case expression of
         FunctionOrValue _ name ->
-            if name == toMatch then
+            if name == matchName then
                 1
 
             else
@@ -230,7 +365,9 @@ usesIn expression toMatch =
         _ ->
             expressionsInExpression expression
                 |> List.map
-                    (\(Node _ expr) -> usesIn expr toMatch)
+                    (\(Node _ expr) ->
+                        usesIn expr matchName
+                    )
                 |> List.sum
 
 
