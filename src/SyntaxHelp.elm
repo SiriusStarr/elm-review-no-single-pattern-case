@@ -1,10 +1,12 @@
-module SyntaxHelp exposing (VarPatternKind(..), allVarsInPattern, expressionsInExpression, parensAroundNamedPattern, updateExpressionsInExpression, usesIn)
+module SyntaxHelp exposing (VarPatternKind(..), allVarsInPattern, expressionsInExpression, parensAroundNamedPattern, prettyPrintPattern, updateExpressionsInExpression, usesIn)
 
 import Elm.CodeGen exposing (parensPattern, val)
+import Elm.Pretty exposing (prettyPattern)
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Pattern exposing (Pattern(..))
 import Elm.Syntax.Range exposing (Range)
+import Pretty exposing (pretty)
 
 
 {-| The direct child expressions.
@@ -104,14 +106,14 @@ expressionsInExpression expression =
             []
 
 
-updateExpressionsInExpression : (Expression -> Expression) -> Expression -> Expression
+updateExpressionsInExpression : (Node Expression -> Node Expression) -> Expression -> Expression
 updateExpressionsInExpression update expression =
     let
         updateExpressionsInRecordSetters =
             List.map
                 (Node.map
                     (\( field, expr ) ->
-                        ( field, expr |> Node.map update )
+                        ( field, expr |> update )
                     )
                 )
     in
@@ -130,13 +132,13 @@ updateExpressionsInExpression update expression =
                                                     { f
                                                         | expression =
                                                             f.expression
-                                                                |> Node.map update
+                                                                |> update
                                                     }
                                                 )
                                 }
 
                         LetDestructuring pattern toDestructure ->
-                            LetDestructuring pattern (toDestructure |> Node.map update)
+                            LetDestructuring pattern (toDestructure |> update)
             in
             LetExpression
                 { declarations =
@@ -144,16 +146,16 @@ updateExpressionsInExpression update expression =
                         |> List.map
                             (Node.map updateExpressionInLetDeclaration)
                 , expression =
-                    letBlock.expression |> Node.map update
+                    letBlock.expression |> update
                 }
 
         ListExpr expressions ->
             ListExpr
-                (expressions |> List.map (Node.map update))
+                (expressions |> List.map update)
 
         TupledExpression expressions ->
             TupledExpression
-                (expressions |> List.map (Node.map update))
+                (expressions |> List.map update)
 
         RecordExpr setters ->
             RecordExpr
@@ -164,46 +166,45 @@ updateExpressionsInExpression update expression =
                 (updaters |> updateExpressionsInRecordSetters)
 
         Application expressions ->
-            Application (expressions |> List.map (Node.map update))
+            Application (expressions |> List.map update)
 
         CaseExpression caseBlock ->
             CaseExpression
-                { expression = caseBlock.expression |> Node.map update
+                { expression = caseBlock.expression |> update
                 , cases =
                     caseBlock.cases
                         |> List.map
                             (\( pattern, expr ) ->
-                                ( pattern, expr |> Node.map update )
+                                ( pattern, expr |> update )
                             )
                 }
 
         OperatorApplication name dir aExpr bExpr ->
             OperatorApplication name
                 dir
-                (aExpr |> Node.map update)
-                (bExpr |> Node.map update)
+                (aExpr |> update)
+                (bExpr |> update)
 
         IfBlock boolExpr thenExpr elseExpr ->
-            IfBlock (boolExpr |> Node.map update)
-                (thenExpr |> Node.map update)
-                (elseExpr |> Node.map update)
+            IfBlock (boolExpr |> update)
+                (thenExpr |> update)
+                (elseExpr |> update)
 
         LambdaExpression lambda ->
             LambdaExpression
                 { lambda
                     | expression =
-                        lambda.expression
-                            |> Node.map update
+                        lambda.expression |> update
                 }
 
         RecordAccess record fieldName ->
-            RecordAccess (record |> Node.map update) fieldName
+            RecordAccess (record |> update) fieldName
 
         ParenthesizedExpression expr ->
-            ParenthesizedExpression (expr |> Node.map update)
+            ParenthesizedExpression (expr |> update)
 
         Negation expr ->
-            Negation (expr |> Node.map update)
+            Negation (expr |> update)
 
         UnitExpr ->
             expression
@@ -396,3 +397,26 @@ parensAroundNamedPattern casePattern =
 
         _ ->
             casePattern
+
+
+{-| If you call `Elm.Pretty.prettyPattern` on `ParenthesizedPattern inner`, `inner` is the result.
+This method displays the actual `(inner)`. It's the same with `AsPattern`.
+-}
+prettyPrintPattern : Int -> Pattern -> String
+prettyPrintPattern width pattern =
+    let
+        printedPattern =
+            pattern |> prettyPattern |> pretty width
+
+        inParens =
+            "(" ++ printedPattern ++ ")"
+    in
+    case pattern of
+        ParenthesizedPattern _ ->
+            inParens
+
+        AsPattern _ _ ->
+            inParens
+
+        _ ->
+            printedPattern

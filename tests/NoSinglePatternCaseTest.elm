@@ -1,6 +1,6 @@
 module NoSinglePatternCaseTest exposing (all)
 
-import NoSinglePatternCase exposing (rule)
+import NoSinglePatternCase exposing (alwaysFixInArgument, alwaysFixInLet, destructureTheArgument, destructureUsingAs, fixByDestructuringInExistingLets, noFix, noFixOnNameClash, rule)
 import Review.Test
 import Test exposing (Test, describe, test)
 
@@ -11,59 +11,82 @@ all =
         [ allowed, disallowed ]
 
 
+allowed : Test
+allowed =
+    describe "allows"
+        [ test "multi-pattern cases" <|
+            \() ->
+                """module A exposing (..)
+
+type AOrB = A | B
+
+isA : AOrB -> Bool
+isA aOrB =
+    case aOrB of
+        A -> True
+        B -> False
+"""
+                    |> Review.Test.run (rule alwaysFixInArgument)
+                    |> Review.Test.expectNoErrors
+        ]
+
+
 disallowed : Test
 disallowed =
     describe "does not allow"
         [ withUselessPattern
-        , withPattern
+        , destructureTheArgumentTest
+        , destructureInExistingLetsTest
         ]
 
 
 withUselessPattern : Test
 withUselessPattern =
-    describe "with useless pattern (_ or ())"
-        [ describe "replace argument"
-            [ test "_" <|
-                \() ->
-                    """module A exposing (..)
+    describe "useless pattern (_ or ())"
+        [ describe "replace the argument"
+            [ describe "possible"
+                [ test "_" <|
+                    \() ->
+                        """module A exposing (..)
 
 always2 : a -> Int
 always2 a =
     case a of
         _ -> 2
 """
-                        |> Review.Test.run rule
-                        |> Review.Test.expectErrors
-                            [ error """case a of
+                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.expectErrors
+                                [ error """case a of
         _ -> 2""" |> Review.Test.whenFixed """module A exposing (..)
 
 always2 : a -> Int
 always2 _ =
     2
 """
-                            ]
-            , test "()" <|
-                \() ->
-                    """module A exposing (..)
+                                ]
+                , test "()" <|
+                    \() ->
+                        """module A exposing (..)
 
 pointless : () -> Bool
 pointless unit =
     case unit of
         () -> True
 """
-                        |> Review.Test.run rule
-                        |> Review.Test.expectErrors
-                            [ error """case unit of
+                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.expectErrors
+                                [ error """case unit of
         () -> True"""
-                                |> Review.Test.whenFixed """module A exposing (..)
+                                    |> Review.Test.whenFixed """module A exposing (..)
 
 pointless : () -> Bool
 pointless () =
     True
 """
-                            ]
+                                ]
+                ]
             ]
-        , test "can't replace argument" <|
+        , test "not possible" <|
             \() ->
                 """module A exposing (..)
 
@@ -72,7 +95,7 @@ add2 n =
     case n of
         _ -> n + 2
 """
-                    |> Review.Test.run rule
+                    |> Review.Test.run (rule alwaysFixInArgument)
                     |> Review.Test.expectErrors
                         [ error """case n of
         _ -> n + 2""" |> Review.Test.whenFixed """module A exposing (..)
@@ -82,13 +105,40 @@ add2 n =
     n + 2
 """
                         ]
+        , test "(don't) destructure in existing lets" <|
+            \() ->
+                """module A exposing (..)
+
+always2 : a -> Int
+always2 a =
+    let
+        foo =
+            bar
+    in
+    case a of
+        _ -> 2
+"""
+                    |> Review.Test.run (rule alwaysFixInLet)
+                    |> Review.Test.expectErrors
+                        [ error """case a of
+        _ -> 2""" |> Review.Test.whenFixed """module A exposing (..)
+
+always2 : a -> Int
+always2 a =
+    let
+        foo =
+            bar
+    in
+    2
+"""
+                        ]
         ]
 
 
-withPattern : Test
-withPattern =
-    describe "with pattern"
-        [ describe "replace argument"
+destructureTheArgumentTest : Test
+destructureTheArgumentTest =
+    describe "destructure the argument"
+        [ describe "possible"
             [ test "destructure named pattern" <|
                 \() ->
                     """module A exposing (..)
@@ -100,7 +150,7 @@ unpack o =
     case o of
         Opaque i -> i
 """
-                        |> Review.Test.run rule
+                        |> Review.Test.run (rule alwaysFixInArgument)
                         |> Review.Test.expectErrors
                             [ error """case o of
         Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
@@ -130,7 +180,7 @@ unpack ((Opaque ii) as oo) =
     in
     subUnpack
 """
-                        |> Review.Test.run rule
+                        |> Review.Test.run (rule alwaysFixInArgument)
                         |> Review.Test.expectErrors
                             [ error """case o of
                 Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
@@ -150,8 +200,8 @@ unpack ((Opaque ii) as oo) =
 """
                             ]
             ]
-        , describe "can't replace argument"
-            [ test "because the variable in case and of is used multiple times" <|
+        , describe "not possible"
+            [ test "as needed because the variable in case and of is used multiple times" <|
                 \() ->
                     """module A exposing (..)
 
@@ -162,7 +212,7 @@ withUnpacked o =
     case o of
         Opaque i -> ( i, o )
 """
-                        |> Review.Test.run rule
+                        |> Review.Test.run (rule alwaysFixInArgument)
                         |> Review.Test.expectErrors
                             [ error """case o of
         Opaque i -> ( i, o )""" |> Review.Test.whenFixed """module A exposing (..)
@@ -170,52 +220,13 @@ withUnpacked o =
 type Opaque = Opaque Int
 
 withUnpacked : Opaque -> ( Int, Opaque )
-withUnpacked o =
-    let
-        (Opaque i) =
-            o
-    in
+withUnpacked ((Opaque i) as o) =
     ( i, o )
-"""
-                            ]
-            , test "lets are not combined" <|
-                \() ->
-                    """module A exposing (..)
-
-type Opaque = Opaque Int
-
-unpack : Opaque -> Int
-unpack o =
-    let
-        (Opaque ii) =
-            o
-    in
-    case o of
-        Opaque i -> i
-"""
-                        |> Review.Test.run rule
-                        |> Review.Test.expectErrors
-                            [ error """case o of
-        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
-
-type Opaque = Opaque Int
-
-unpack : Opaque -> Int
-unpack o =
-    let
-        (Opaque ii) =
-            o
-    in
-    let
-        (Opaque i) =
-            o
-    in
-    i
-"""
-                            ]
-            , test "because in case and of isn't just a variable" <|
-                \() ->
-                    """module A exposing (..)
+""" ]
+            , describe "can't use as"
+                [ test "because in case and of isn't just a variable" <|
+                    \() ->
+                        """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -224,25 +235,14 @@ unpack o =
     case ( o, o ) of
         ( Opaque i, Opaque ii ) -> i
 """
-                        |> Review.Test.run rule
-                        |> Review.Test.expectErrors
-                            [ error """case ( o, o ) of
-        ( Opaque i, Opaque ii ) -> i""" |> Review.Test.whenFixed """module A exposing (..)
-
-type Opaque = Opaque Int
-
-unpack : Opaque -> Int
-unpack o =
-    let
-        ( Opaque i, Opaque ii ) =
-            ( o, o )
-    in
-    i
-"""
-                            ]
-            , test "because the variable in case and of is defined at top level" <|
-                \() ->
-                    """module A exposing (..)
+                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.expectErrors
+                                [ error """case ( o, o ) of
+        ( Opaque i, Opaque ii ) -> i"""
+                                ]
+                , test "because the variable in case and of is defined outside of this function's scope" <|
+                    \() ->
+                        """module A exposing (..)
 
 topLevel : Opaque
 topLevel =
@@ -255,29 +255,14 @@ unpacked =
     case topLevel of
         Opaque i -> i
 """
-                        |> Review.Test.run rule
-                        |> Review.Test.expectErrors
-                            [ error """case topLevel of
-        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
-
-topLevel : Opaque
-topLevel =
-    Opaque 2
-
-type Opaque = Opaque Int
-
-unpacked : Int
-unpacked =
-    let
-        (Opaque i) =
-            topLevel
-    in
-    i
-"""
-                            ]
-            , test "because the variable in case and of is from a pattern after as" <|
-                \() ->
-                    """module A exposing (..)
+                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.expectErrors
+                                [ error """case topLevel of
+        Opaque i -> i"""
+                                ]
+                , test "because the variable in case and of is from a pattern after as" <|
+                    \() ->
+                        """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -286,25 +271,14 @@ unpack ((Opaque ii) as o) =
     case o of
         Opaque i -> i
 """
-                        |> Review.Test.run rule
-                        |> Review.Test.expectErrors
-                            [ error """case o of
-        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
-
-type Opaque = Opaque Int
-
-unpack : Opaque -> Int
-unpack ((Opaque ii) as o) =
-    let
-        (Opaque i) =
-            o
-    in
-    i
-"""
-                            ]
-            , test "because the variable in case and of is from a record field pattern" <|
-                \() ->
-                    """module A exposing (..)
+                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.expectErrors
+                                [ error """case o of
+        Opaque i -> i"""
+                                ]
+                , test "because the variable in case and of is from a record field pattern" <|
+                    \() ->
+                        """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -313,25 +287,14 @@ unpack { o } =
     case o of
         Opaque i -> i
 """
-                        |> Review.Test.run rule
-                        |> Review.Test.expectErrors
-                            [ error """case o of
-        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
-
-type Opaque = Opaque Int
-
-unpack : { o : Opaque } -> Int
-unpack { o } =
-    let
-        (Opaque i) =
-            o
-    in
-    i
-"""
-                            ]
-            , test "because the variable in case and of is the name of a let variable with an annotation" <|
-                \() ->
-                    """module A exposing (..)
+                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.expectErrors
+                                [ error """case o of
+        Opaque i -> i"""
+                                ]
+                , test "because the variable in case and of is the name of a let variable with an annotation" <|
+                    \() ->
+                        """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -348,33 +311,14 @@ unpack oo =
     in
     unpacked
 """
-                        |> Review.Test.run rule
-                        |> Review.Test.expectErrors
-                            [ error """case o of
-                Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
-
-type Opaque = Opaque Int
-
-unpack : Opaque -> Int
-unpack oo =
-    let
-        o : Opaque
-        o =
-            oo
-
-        unpacked =
-            let
-                (Opaque i) =
-                    o
-            in
-            i
-    in
-    unpacked
-"""
-                            ]
-            , test "because there's a var pattern outside has the same name as in the case pattern" <|
-                \() ->
-                    """module A exposing (..)
+                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.expectErrors
+                                [ error """case o of
+                Opaque i -> i"""
+                                ]
+                , test "because a var pattern outside has the same name as in the case pattern → name clash" <|
+                    \() ->
+                        """module A exposing (..)
 
 unpack : Opaque -> Int
 unpack o =
@@ -385,10 +329,178 @@ unpack o =
     case o of
         Opaque i -> i
 """
-                        |> Review.Test.run rule
+                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.expectErrors
+                                [ error """case o of
+        Opaque i -> i"""
+                                ]
+                ]
+            ]
+        ]
+
+
+destructureInExistingLetsTest : Test
+destructureInExistingLetsTest =
+    describe "in existing lets"
+        [ test "possible" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo =
+            bar
+    in
+    case o of
+        Opaque i -> i
+"""
+                    |> Review.Test.run (rule alwaysFixInLet)
+                    |> Review.Test.expectErrors
+                        [ error """case o of
+        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo =
+            bar
+    
+        (Opaque i) =
+            o
+    in
+    i
+"""
+                        ]
+        , describe "no existing lets → destructureTheArgument"
+            [ test "possible" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case o of
+        Opaque i -> i
+"""
+                        |> Review.Test.run
+                            (rule
+                                (fixByDestructuringInExistingLets
+                                    { noExistingLets =
+                                        destructureTheArgument
+                                            { argumentAlsoUsedElsewhere = destructureUsingAs }
+                                    }
+                                    |> noFixOnNameClash
+                                )
+                            )
                         |> Review.Test.expectErrors
                             [ error """case o of
         Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack (Opaque i) =
+    i
+"""
+                            ]
+            , test "argument also used elsewhere, destructured using as" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case o of
+        Opaque i -> ( o, i )
+"""
+                        |> Review.Test.run
+                            (rule
+                                (fixByDestructuringInExistingLets
+                                    { noExistingLets =
+                                        destructureTheArgument
+                                            { argumentAlsoUsedElsewhere =
+                                                destructureUsingAs
+                                            }
+                                    }
+                                    |> noFixOnNameClash
+                                )
+                            )
+                        |> Review.Test.expectErrors
+                            [ error """case o of
+        Opaque i -> ( o, i )""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack ((Opaque i) as o) =
+    ( o, i )
+"""
+                            ]
+            , test "the argument is a record field pattern, no fix" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : { o : Opaque } -> Int
+unpack { o } =
+    case o of
+        Opaque i -> i
+"""
+                        |> Review.Test.run
+                            (rule
+                                (fixByDestructuringInExistingLets
+                                    { noExistingLets =
+                                        destructureTheArgument
+                                            { argumentAlsoUsedElsewhere =
+                                                destructureUsingAs
+                                            }
+                                    }
+                                    |> noFixOnNameClash
+                                )
+                            )
+                        |> Review.Test.expectErrors
+                            [ error """case o of
+        Opaque i -> i"""
+                            ]
+            , test "between case and of is not just an argument, no fix" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case ( o, o ) of
+        ( Opaque i, Opaque ii ) -> i
+"""
+                        |> Review.Test.run
+                            (rule
+                                (fixByDestructuringInExistingLets
+                                    { noExistingLets =
+                                        destructureTheArgument
+                                            { argumentAlsoUsedElsewhere =
+                                                destructureUsingAs
+                                            }
+                                    }
+                                    |> noFixOnNameClash
+                                )
+                            )
+                        |> Review.Test.expectErrors
+                            [ error """case ( o, o ) of
+        ( Opaque i, Opaque ii ) -> i"""
+                            ]
+            ]
+        , test "because a var pattern outside has the same name as in the case pattern → name clash" <|
+            \() ->
+                """module A exposing (..)
 
 unpack : Opaque -> Int
 unpack o =
@@ -396,34 +508,20 @@ unpack o =
         something i =
             use i
     in
-    let
-        (Opaque i) =
-            o
-    in
-    i
+    case o of
+        Opaque i -> i
 """
-                            ]
-            ]
-        ]
-
-
-allowed : Test
-allowed =
-    describe "allows"
-        [ test "multi-pattern cases" <|
-            \() ->
-                """module A exposing (..)
-
-type AOrB = A | B
-
-isA : AOrB -> Bool
-isA aOrB =
-    case aOrB of
-        A -> True
-        B -> False
-"""
-                    |> Review.Test.run rule
-                    |> Review.Test.expectNoErrors
+                    |> Review.Test.run
+                        (rule
+                            (fixByDestructuringInExistingLets
+                                { noExistingLets = noFix }
+                                |> noFixOnNameClash
+                            )
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case o of
+        Opaque i -> i"""
+                        ]
         ]
 
 
