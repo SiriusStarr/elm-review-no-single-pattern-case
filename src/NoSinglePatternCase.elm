@@ -224,7 +224,7 @@ Don't provide a fix if the only option left is creating a separate let.
 
 -}
 type DontCreateSeparateLet
-    = NoFixIfNoOtherOption Never
+    = NoFixIfOnlyCreatingSeparateLetLeft Never
 
 
 {-| Phantom type only, saying:
@@ -241,7 +241,7 @@ If the only option left is creating a separate let, do that.
 
 -}
 type CreateSeparateLet
-    = CreateSeparateLetIfNoOtherOption Never
+    = CreateSeparateLetIfOnlyOptionLeft Never
 
 
 type OrOnlyCreatingSeparateLetLeft option separateLetAllowed
@@ -964,45 +964,32 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
         fix =
             case fixKind of
                 FixByDestructuringInExistingLets { noExistingLets } ->
-                    case mostInnerLetBlock of
-                        Just existingLetBlock ->
-                            fixInLetBlock existingLetBlock
-
-                        Nothing ->
+                    fixInExistingLets
+                        { noExistingLets =
                             noExistingLets
                                 |> orOnlyCreatingSeparateLetLeftFix
                                     (\(DestructureTheArgument { argumentAlsoUsedElsewhere }) ->
                                         case isDestructurable expressionInCaseOf of
                                             Destructurable varInCaseOf ->
-                                                case usesIn varInCaseOf.scope varInCaseOf.name of
-                                                    1 ->
-                                                        replaceVarPatternFix
-                                                            { varRange = varInCaseOf.nameRange
-                                                            , varPatternScope = varInCaseOf.scope
-                                                            }
-
-                                                    _ ->
+                                                replaceVarPatternFixIfUsedOnce varInCaseOf
+                                                    { usedOften =
                                                         argumentAlsoUsedElsewhere
                                                             |> orOnlyCreatingSeparateLetLeftFix
                                                                 (\DestructureUsingAs ->
                                                                     destructureUsingAsFix varInCaseOf
                                                                 )
+                                                    }
 
                                             NotDestructurable ->
                                                 onlySeparateLetFixLeftFix ()
                                     )
+                        }
 
                 FixByDestructuringTheArgument { argumentAlsoUsedElsewhere, notDestructable } ->
                     case isDestructurable expressionInCaseOf of
                         Destructurable varInCaseOf ->
-                            case usesIn varInCaseOf.scope varInCaseOf.name of
-                                1 ->
-                                    replaceVarPatternFix
-                                        { varRange = varInCaseOf.nameRange
-                                        , varPatternScope = varInCaseOf.scope
-                                        }
-
-                                _ ->
+                            replaceVarPatternFixIfUsedOnce varInCaseOf
+                                { usedOften =
                                     case argumentAlsoUsedElsewhere of
                                         DestructureUsingAsInstead ->
                                             destructureUsingAsFix varInCaseOf
@@ -1013,18 +1000,28 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                                                     (\DestructureUsingAs ->
                                                         destructureUsingAsFix varInCaseOf
                                                     )
+                                }
 
                         NotDestructurable ->
                             notDestructable
                                 |> orOnlyCreatingSeparateLetLeftFix
                                     (\DestructureInExistingLets ->
-                                        case mostInnerLetBlock of
-                                            Just existingLetBlock ->
-                                                fixInLetBlock existingLetBlock
-
-                                            Nothing ->
+                                        fixInExistingLets
+                                            { noExistingLets =
                                                 onlySeparateLetFixLeftFix ()
+                                            }
                                     )
+
+        replaceVarPatternFixIfUsedOnce varInCaseOf { usedOften } =
+            case usesIn varInCaseOf.scope varInCaseOf.name of
+                1 ->
+                    replaceVarPatternFix
+                        { varRange = varInCaseOf.nameRange
+                        , varPatternScope = varInCaseOf.scope
+                        }
+
+                _ ->
+                    usedOften
 
         isDestructurable expression =
             case expression of
@@ -1053,6 +1050,14 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
 
                 _ ->
                     NotDestructurable
+
+        fixInExistingLets { noExistingLets } =
+            case mostInnerLetBlock of
+                Just existingLetBlock ->
+                    fixInLetBlock existingLetBlock
+
+                Nothing ->
+                    noExistingLets
 
         orOnlyCreatingSeparateLetLeftFix inFix options =
             case options of
