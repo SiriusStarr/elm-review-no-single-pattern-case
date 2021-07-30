@@ -1,6 +1,7 @@
 module NoSinglePatternCase exposing
     ( rule
-    , Config, CreateSeparateLet, DontCreateSeparateLet
+    , Config
+    , CreateSeparateLet, DontCreateSeparateLet
     , alwaysFixInArgument, alwaysFixInLet
     , fixByDestructuringInExistingLets, fixByDestructuringTheArgument
     , destructureInExistingLets, destructureUsingAs, destructureTheArgument, destructureUsingAsInstead, destructureInExistingLetsInstead
@@ -15,7 +16,8 @@ module NoSinglePatternCase exposing
 
 # configure
 
-@docs Config, CreateSeparateLet, DontCreateSeparateLet
+@docs Config
+@docs CreateSeparateLet, DontCreateSeparateLet
 
 
 ## default
@@ -458,7 +460,7 @@ For example
                     { noExistingLetsWhereArgumentIsntUsed =
                         createSeparateLet
                     }
-            , noArgumentInCaseOfOrArgumentNotDestructable =
+            , notDestructable =
                 destructureInExistingLets
             }
             |> createSeparateLetOnNameClash
@@ -498,6 +500,15 @@ fixByDestructuringTheArgument exceptions =
                 o
         in
         f i thing
+
+For example
+
+    fixByDestructuringTheArgument
+        { argumentAlsoUsedElsewhere =
+            destructureUsingAsInstead
+        , notDestructable =
+            destructureInExistingLets
+        }
 
 -}
 destructureInExistingLets :
@@ -687,7 +698,7 @@ Equivalent to
 
     fixByDestructuringTheArgument
         { argumentAlsoUsedElsewhere = destructureUsingAsInstead
-        , noArgumentInCaseOfOrArgumentNotDestructable = noFix
+        , notDestructable = noFix
         }
         |> noFixOnNameClash
 
@@ -967,14 +978,14 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                     fixInExistingLets
                         { noExistingLets =
                             noExistingLets
-                                |> orOnlyCreatingSeparateLetLeftFix
+                                |> onlyCreatingSeparateLetLeftFixOr
                                     (\(DestructureTheArgument { argumentAlsoUsedElsewhere }) ->
                                         case isDestructurable expressionInCaseOf of
                                             Destructurable varInCaseOf ->
                                                 replaceVarPatternFixIfUsedOnce varInCaseOf
                                                     { usedOften =
                                                         argumentAlsoUsedElsewhere
-                                                            |> orOnlyCreatingSeparateLetLeftFix
+                                                            |> onlyCreatingSeparateLetLeftFixOr
                                                                 (\DestructureUsingAs ->
                                                                     destructureUsingAsFix varInCaseOf
                                                                 )
@@ -995,16 +1006,19 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                                             destructureUsingAsFix varInCaseOf
 
                                         DestructureInExistingLetsInstead { noExistingLetsWhereArgumentIsntUsed } ->
-                                            noExistingLetsWhereArgumentIsntUsed
-                                                |> orOnlyCreatingSeparateLetLeftFix
-                                                    (\DestructureUsingAs ->
-                                                        destructureUsingAsFix varInCaseOf
-                                                    )
+                                            fixInExistingLets
+                                                { noExistingLets =
+                                                    noExistingLetsWhereArgumentIsntUsed
+                                                        |> onlyCreatingSeparateLetLeftFixOr
+                                                            (\DestructureUsingAs ->
+                                                                destructureUsingAsFix varInCaseOf
+                                                            )
+                                                }
                                 }
 
                         NotDestructurable ->
                             notDestructable
-                                |> orOnlyCreatingSeparateLetLeftFix
+                                |> onlyCreatingSeparateLetLeftFixOr
                                     (\DestructureInExistingLets ->
                                         fixInExistingLets
                                             { noExistingLets =
@@ -1059,7 +1073,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                 Nothing ->
                     noExistingLets
 
-        orOnlyCreatingSeparateLetLeftFix inFix options =
+        onlyCreatingSeparateLetLeftFixOr inFix options =
             case options of
                 OnlyCreatingSeparateLetLeftFix ->
                     onlySeparateLetFixLeftFix ()
@@ -1078,10 +1092,10 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
         replaceCaseWithExpressionAfterThePattern =
             Fix.replaceRangeBy caseRange
                 (singleCaseExpression
-                    |> prettyExpr caseRange
+                    |> prettyExpressionReplacing caseRange
                 )
 
-        replaceCaseWithExpressionAfterThePatternIfUseless { notUseless } pattern =
+        replaceUselessCase { notUseless } pattern =
             case pattern of
                 AllPattern ->
                     [ replaceCaseWithExpressionAfterThePattern ]
@@ -1106,7 +1120,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
 
         destructureUsingAsFix { name, nameRange, scope } =
             singleCasePattern
-                |> replaceCaseWithExpressionAfterThePatternIfUseless
+                |> replaceUselessCase
                     { notUseless =
                         onlySeparateLetFixLeftFixIfNameClashIn scope
                             { noClash =
@@ -1121,7 +1135,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
 
         fixInLetBlock letBlock =
             singleCasePattern
-                |> replaceCaseWithExpressionAfterThePatternIfUseless
+                |> replaceUselessCase
                     { notUseless =
                         onlySeparateLetFixLeftFixIfNameClashIn
                             (letExpr
@@ -1155,7 +1169,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                      in
                      letBlock.expression |> replaceTheCase
                     )
-                    |> prettyExpr caseRange
+                    |> prettyExpressionReplacing caseRange
                 )
             ]
 
@@ -1173,7 +1187,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
 
         createSeparateLetFix () =
             singleCasePattern
-                |> replaceCaseWithExpressionAfterThePatternIfUseless
+                |> replaceUselessCase
                     { notUseless =
                         [ Fix.replaceRangeBy caseRange
                             (letExpr
@@ -1182,7 +1196,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                                     expressionInCaseOf
                                 ]
                                 singleCaseExpression
-                                |> prettyExpr caseRange
+                                |> prettyExpressionReplacing caseRange
                             )
                         ]
                     }
@@ -1200,8 +1214,8 @@ type IsDestructable
     | NotDestructurable
 
 
-prettyExpr : Range -> Expression -> String
-prettyExpr replacedRange =
+prettyExpressionReplacing : Range -> Expression -> String
+prettyExpressionReplacing replacedRange =
     prettyExpression
         >> pretty 120
         >> adaptIndentation replacedRange
