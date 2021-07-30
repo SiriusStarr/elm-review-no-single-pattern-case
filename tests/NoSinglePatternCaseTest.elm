@@ -245,7 +245,7 @@ withUnpacked o =
                                         (fixByDestructuringTheArgument
                                             { argumentAlsoUsedElsewhere =
                                                 destructureInExistingLetsInstead
-                                                    { noExistingLetsWhereArgumentIsntUsed =
+                                                    { noExistingLets =
                                                         destructureUsingAs
                                                     }
                                             , notDestructable = noFix
@@ -286,7 +286,7 @@ withUnpacked o =
                                         (fixByDestructuringTheArgument
                                             { argumentAlsoUsedElsewhere =
                                                 destructureInExistingLetsInstead
-                                                    { noExistingLetsWhereArgumentIsntUsed =
+                                                    { noExistingLets =
                                                         destructureUsingAs
                                                     }
                                             , notDestructable = noFix
