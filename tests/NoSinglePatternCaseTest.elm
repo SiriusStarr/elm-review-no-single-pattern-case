@@ -174,11 +174,11 @@ unpack ((Opaque ii) as oo) =
         (Opaque o) =
             Opaque oo
 
-        subUnpack =
+        unpacked =
             case o of
                 Opaque i -> i
     in
-    subUnpack
+    unpacked
 """
                         |> Review.Test.run (rule alwaysFixInArgument)
                         |> Review.Test.expectErrors
@@ -193,10 +193,10 @@ unpack ((Opaque ii) as oo) =
         (Opaque (Opaque i)) =
             Opaque oo
 
-        subUnpack =
+        unpacked =
             i
     in
-    subUnpack
+    unpacked
 """
                             ]
             ]
@@ -406,8 +406,8 @@ unpack oo =
 unpack : Opaque -> Int
 unpack o =
     let
-        something i =
-            use i
+        clash i =
+            i
     in
     case o of
         Opaque i -> i
@@ -588,8 +588,8 @@ unpack o =
 unpack : Opaque -> Int
 unpack o =
     let
-        something i =
-            use i
+        clash i =
+            i
     in
     case o of
         Opaque i -> i
