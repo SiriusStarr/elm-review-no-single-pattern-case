@@ -1,6 +1,6 @@
 module NoSinglePatternCaseTest exposing (all)
 
-import NoSinglePatternCase exposing (alwaysFixInArgument, alwaysFixInLet, destructureInExistingLetsInstead, destructureTheArgument, destructureUsingAs, fixByDestructuringInExistingLets, fixByDestructuringTheArgument, noFix, noFixOnNameClash, rule)
+import NoSinglePatternCase exposing (alwaysFixInArgument, alwaysFixInLet, destructureAs, destructureInExistingLetsInstead, destructureTheArgument, fixByDestructuringInExistingLets, fixByDestructuringTheArgument, noFix, noFixOnNameClash, rule)
 import Review.Test
 import Test exposing (Test, describe, test)
 
@@ -245,9 +245,7 @@ withUnpacked o =
                                         (fixByDestructuringTheArgument
                                             { argumentAlsoUsedElsewhere =
                                                 destructureInExistingLetsInstead
-                                                    { noExistingLets =
-                                                        destructureUsingAs
-                                                    }
+                                                    { noExistingLets = destructureAs }
                                             , notDestructable = noFix
                                             }
                                             |> noFixOnNameClash
@@ -287,7 +285,7 @@ withUnpacked o =
                                             { argumentAlsoUsedElsewhere =
                                                 destructureInExistingLetsInstead
                                                     { noExistingLets =
-                                                        destructureUsingAs
+                                                        destructureAs
                                                     }
                                             , notDestructable = noFix
                                             }
@@ -476,7 +474,7 @@ unpack o =
                                 (fixByDestructuringInExistingLets
                                     { noExistingLets =
                                         destructureTheArgument
-                                            { argumentAlsoUsedElsewhere = destructureUsingAs }
+                                            { argumentAlsoUsedElsewhere = destructureAs }
                                     }
                                     |> noFixOnNameClash
                                 )
@@ -509,7 +507,7 @@ unpack o =
                                     { noExistingLets =
                                         destructureTheArgument
                                             { argumentAlsoUsedElsewhere =
-                                                destructureUsingAs
+                                                destructureAs
                                             }
                                     }
                                     |> noFixOnNameClash
@@ -543,7 +541,7 @@ unpack { o } =
                                     { noExistingLets =
                                         destructureTheArgument
                                             { argumentAlsoUsedElsewhere =
-                                                destructureUsingAs
+                                                destructureAs
                                             }
                                     }
                                     |> noFixOnNameClash
@@ -570,7 +568,7 @@ unpack o =
                                     { noExistingLets =
                                         destructureTheArgument
                                             { argumentAlsoUsedElsewhere =
-                                                destructureUsingAs
+                                                destructureAs
                                             }
                                     }
                                     |> noFixOnNameClash

@@ -4,7 +4,7 @@ module NoSinglePatternCase exposing
     , CreateSeparateLet, DontCreateSeparateLet
     , alwaysFixInArgument, alwaysFixInLet
     , fixByDestructuringInExistingLets, fixByDestructuringTheArgument
-    , destructureInExistingLets, destructureUsingAs, destructureTheArgument, useAs, destructureInExistingLetsInstead
+    , destructureInExistingLets, destructureAs, destructureTheArgument, destructureAsInstead, destructureInExistingLetsInstead
     , noFix, createSeparateLet
     , createSeparateLetOnNameClash, noFixOnNameClash
     )
@@ -28,7 +28,7 @@ module NoSinglePatternCase exposing
 ## detailed
 
 @docs fixByDestructuringInExistingLets, fixByDestructuringTheArgument
-@docs destructureInExistingLets, destructureUsingAs, destructureTheArgument, useAs, destructureInExistingLetsInstead
+@docs destructureInExistingLets, destructureAs, destructureTheArgument, destructureAsInstead, destructureInExistingLetsInstead
 
 
 ### separate let is only option left
@@ -164,15 +164,15 @@ options:
               - | If the argument pattern is a record field pattern or `as` destructured, use [_"only separate let fix left"_](#only-separate-let-fix-left)
               - | If in `case` and `of` is not just an argument, use [_"only separate let fix left"_](#only-separate-let-fix-left)
               - | `argumentAlsoUsedElsewhere`
-                  - [`destructureUsingAs`](NoSinglePatternCase#destructureUsingAs)
+                  - [`destructureAs`](NoSinglePatternCase#destructureAs)
                   - [_"only separate let fix left"_](#only-separate-let-fix-left)
           - [_"only separate let fix left"_](#only-separate-let-fix-left)
   - [`fixByDestructuringTheArgument`](NoSinglePatternCase#fixByDestructuringTheArgument)
       - | `argumentAlsoUsedElsewhere`
-          - [`useAs`](NoSinglePatternCase#useAs)
+          - [`destructureAsInstead`](NoSinglePatternCase#destructureAsInstead)
           - [`destructureInExistingLetsInstead`](NoSinglePatternCase#destructureInExistingLetsInstead)
               - | `noExistingLets`
-                  - [`destructureUsingAs`](NoSinglePatternCase#destructureUsingAs)
+                  - [`destructureAs`](NoSinglePatternCase#destructureAs)
                   - [_"only separate let fix left"_](#only-separate-let-fix-left)
       - | `notDestructable` -- If in `case` and `of` is not just an argument or if the argument pattern is a record field pattern or `as` destructured
           - [`destructureInExistingLets`](NoSinglePatternCase#destructureInExistingLets)
@@ -294,7 +294,7 @@ type DestructureInExistingLets
 
 
 type ArgumentAlsoUsedElsewhere separateLetUsed
-    = UseAs
+    = UseAsInstead
     | DestructureInExistingLetsInstead
         { noExistingLets :
             OnlyFixInSeparateLetLeftFixOr
@@ -397,7 +397,7 @@ options:
           - | If the var pattern is a record field pattern or `as` destructured, use your fix for the situation "only separate let fix left"
           - | If in `case` and `of` is not just an argument, use your fix for the situation "only separate let fix left"
           - | `argumentAlsoUsedElsewhere`
-              - [`destructureUsingAs`](NoSinglePatternCase#destructureUsingAs)
+              - [`destructureAs`](NoSinglePatternCase#destructureAs)
               - your fix for the situation "only separate let fix left"
       - your fix for the situation "only separate let fix left"
 
@@ -407,7 +407,7 @@ examples
         { noExistingLets =
             destructureTheArgument
                 { argumentAlsoUsedElsewhere =
-                    destructureUsingAs
+                    destructureAs
                 }
         }
 
@@ -441,10 +441,10 @@ fixByDestructuringInExistingLets noExistingLets =
 options:
 
   - | `argumentAlsoUsedElsewhere`
-      - [`useAs`](NoSinglePatternCase#useAs)
+      - [`destructureAsInstead`](NoSinglePatternCase#destructureAsInstead)
       - [`destructureInExistingLetsInstead`](NoSinglePatternCase#destructureInExistingLetsInstead)
           - | `noExistingLets`
-              - [`destructureUsingAs`](NoSinglePatternCase#destructureUsingAs)
+              - [`destructureAs`](NoSinglePatternCase#destructureAs)
               - your fix for the situation "only separate let fix left"
   - | `notDestructable` -- If the expression in `case` and `of` is not an argument or the argument pattern is a record field pattern or `as` destructured
       - [`destructureInExistingLets`](NoSinglePatternCase#destructureInExistingLets)
@@ -503,7 +503,7 @@ fixByDestructuringTheArgument exceptions =
 For example
 
     fixByDestructuringTheArgument
-        { argumentAlsoUsedElsewhere = useAs
+        { argumentAlsoUsedElsewhere = destructureAsInstead
         , notDestructable =
             destructureInExistingLets
         }
@@ -533,16 +533,16 @@ For example
         { noExistingLets =
             destructureTheArgument
                 { argumentAlsoUsedElsewhere =
-                    destructureUsingAs
+                    destructureAs
                 }
         }
 
 -}
-destructureUsingAs :
+destructureAs :
     OnlyFixInSeparateLetLeftFixOr
         DestructureUsingAs
         separateLetUsed
-destructureUsingAs =
+destructureAs =
     Fix DestructureUsingAs
 
 
@@ -561,14 +561,14 @@ options:
   - | If the argument is a record field pattern or `as` destructured, uses your fix for the situation "only separate let fix left".
   - | If in `case` and `of` is not just an argument, uses your fix for the situation "only separate let fix left"
   - | `argumentAlsoUsedElsewhere`
-      - [`destructureUsingAs`](NoSinglePatternCase#destructureUsingAs)
+      - [`destructureAs`](NoSinglePatternCase#destructureAs)
       - your fix for the situation "only separate let fix left"
 
 For example
 
     destructureTheArgument
         { argumentAlsoUsedElsewhere =
-            destructureUsingAs
+            destructureAs
         }
 
 -}
@@ -601,14 +601,15 @@ destructureTheArgument =
 For example
 
     fixByDestructuringTheArgument
-        { argumentAlsoUsedElsewhere = useAs
+        { argumentAlsoUsedElsewhere =
+            destructureAsInstead
         , ...
         }
 
 -}
-useAs : ArgumentAlsoUsedElsewhere separateLetUsed
-useAs =
-    UseAs
+destructureAsInstead : ArgumentAlsoUsedElsewhere separateLetUsed
+destructureAsInstead =
+    UseAsInstead
 
 
 {-| Destructure after existing let declarations.
@@ -635,7 +636,7 @@ useAs =
 options:
 
   - | `noExistingLets`
-      - [`destructureUsingAs`](NoSinglePatternCase#destructureUsingAs)
+      - [`destructureAs`](NoSinglePatternCase#destructureAs)
       - your fix for the situation "only separate let fix left"
 
 For example
@@ -643,7 +644,7 @@ For example
     fixByDestructuringTheArgument
         { argumentAlsoUsedElsewhere =
             destructureInExistingLetsInstead
-                { noExistingLets = destructureUsingAs }
+                { noExistingLets = destructureAs }
         , ...
         }
 
@@ -704,7 +705,7 @@ even if an `as` pattern is required.
 Equivalent to
 
     fixByDestructuringTheArgument
-        { argumentAlsoUsedElsewhere = useAs
+        { argumentAlsoUsedElsewhere = destructureAsInstead
         , notDestructable = noFix
         }
         |> noFixOnNameClash
@@ -713,7 +714,7 @@ Equivalent to
 alwaysFixInArgument : Config DontCreateSeparateLet
 alwaysFixInArgument =
     fixByDestructuringTheArgument
-        { argumentAlsoUsedElsewhere = useAs
+        { argumentAlsoUsedElsewhere = destructureAsInstead
         , notDestructable = noFix
         }
         |> noFixOnNameClash
@@ -994,7 +995,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                                                         argumentAlsoUsedElsewhere
                                                             |> onlyCreatingSeparateLetLeftFixOr
                                                                 (\DestructureUsingAs ->
-                                                                    destructureUsingAsFix varInCaseOf
+                                                                    destructureAsFix varInCaseOf
                                                                 )
                                                     }
 
@@ -1009,8 +1010,8 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                             replaceVarPatternFixIfUsedOnce varInCaseOf
                                 { usedOften =
                                     case argumentAlsoUsedElsewhere of
-                                        UseAs ->
-                                            destructureUsingAsFix varInCaseOf
+                                        UseAsInstead ->
+                                            destructureAsFix varInCaseOf
 
                                         DestructureInExistingLetsInstead { noExistingLets } ->
                                             fixInExistingLets
@@ -1018,7 +1019,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                                                     noExistingLets
                                                         |> onlyCreatingSeparateLetLeftFixOr
                                                             (\DestructureUsingAs ->
-                                                                destructureUsingAsFix varInCaseOf
+                                                                destructureAsFix varInCaseOf
                                                             )
                                                 }
                                 }
@@ -1125,7 +1126,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
             else
                 onlySeparateLetFixLeftFix ()
 
-        destructureUsingAsFix { name, nameRange, scope } =
+        destructureAsFix { name, nameRange, scope } =
             singleCasePattern
                 |> replaceUselessCase
                     { notUseless =
