@@ -52,7 +52,16 @@ import Elm.Syntax.Range exposing (Range, emptyRange)
 import Pretty exposing (pretty)
 import Review.Fix as Fix
 import Review.Rule as Rule exposing (Error, Rule)
-import SyntaxHelp exposing (VarPatternKind(..), allVarsInPattern, expressionsInExpression, parensAroundNamedPattern, prettyPrintPattern, updateExpressionsInExpression, usesIn)
+import SyntaxHelp
+    exposing
+        ( VarPatternKind(..)
+        , allVarsInPattern
+        , mapSubexpressions
+        , parensAroundNamedPattern
+        , prettyPrintPattern
+        , subexpressions
+        , usesIn
+        )
 
 
 {-| Reports single-pattern case expressions, which may be written more concisely
@@ -936,7 +945,7 @@ checkExpression config { vars, mostInnerLetBlock } expressionNode =
                 |> (++) checkDeclarations
 
         otherExpression ->
-            expressionsInExpression otherExpression
+            subexpressions otherExpression
                 |> List.concatMap (checkExpressionHere [])
 
 
@@ -1172,7 +1181,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                             else
                                 expression
                                     |> Node.value
-                                    |> updateExpressionsInExpression
+                                    |> mapSubexpressions
                                         (replaceTheCase >> Node emptyRange)
                      in
                      letBlock.expression |> replaceTheCase

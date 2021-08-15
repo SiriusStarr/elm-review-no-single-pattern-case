@@ -1,4 +1,12 @@
-module SyntaxHelp exposing (VarPatternKind(..), allVarsInPattern, expressionsInExpression, parensAroundNamedPattern, prettyPrintPattern, updateExpressionsInExpression, usesIn)
+module SyntaxHelp exposing
+    ( VarPatternKind(..)
+    , allVarsInPattern
+    , mapSubexpressions
+    , parensAroundNamedPattern
+    , prettyPrintPattern
+    , subexpressions
+    , usesIn
+    )
 
 import Elm.CodeGen exposing (parensPattern, val)
 import Elm.Pretty exposing (prettyPattern)
@@ -9,59 +17,53 @@ import Elm.Syntax.Range exposing (Range)
 import Pretty exposing (pretty)
 
 
-{-| The direct child expressions.
+{-| Get all immediate child expressions of an expression.
 -}
-expressionsInExpression : Expression -> List (Node Expression)
-expressionsInExpression expression =
-    let
-        expressionsInRecordSetters =
-            List.map (\(Node _ ( _, expr )) -> expr)
-    in
-    case expression of
+subexpressions : Expression -> List (Node Expression)
+subexpressions e =
+    case e of
         LetExpression letBlock ->
             let
-                expressionInLetDeclaration (Node _ letDeclaration) =
-                    case letDeclaration of
+                subExprs : Node LetDeclaration -> Node Expression
+                subExprs n =
+                    case Node.value n of
                         LetFunction { declaration } ->
-                            declaration |> Node.value |> .expression
+                            Node.value declaration
+                                |> .expression
 
-                        LetDestructuring _ toDestructure ->
-                            toDestructure
+                        LetDestructuring _ expr ->
+                            expr
             in
-            letBlock.declarations
-                |> List.map expressionInLetDeclaration
-                |> (::) letBlock.expression
+            letBlock.expression :: List.map subExprs letBlock.declarations
 
-        ListExpr expressions ->
-            expressions
+        ListExpr exprs ->
+            exprs
 
-        TupledExpression expressions ->
-            expressions
+        TupledExpression exprs ->
+            exprs
 
         RecordExpr setters ->
-            setters |> expressionsInRecordSetters
+            List.map (Tuple.second << Node.value) setters
 
         RecordUpdateExpression record updaters ->
             Node.map val record
-                :: (updaters |> expressionsInRecordSetters)
+                :: List.map (Tuple.second << Node.value) updaters
 
-        Application expressions ->
-            expressions
+        Application exprs ->
+            exprs
 
         CaseExpression caseBlock ->
             caseBlock.expression
-                :: (caseBlock.cases
-                        |> List.map (\( _, expr ) -> expr)
-                   )
+                :: List.map Tuple.second caseBlock.cases
 
-        OperatorApplication _ _ aExpr bExpr ->
-            [ aExpr, bExpr ]
+        OperatorApplication _ _ e1 e2 ->
+            [ e1, e2 ]
 
-        IfBlock boolExpr thenExpr elseExpr ->
-            [ boolExpr, thenExpr, elseExpr ]
+        IfBlock predExpr thenExpr elseExpr ->
+            [ predExpr, thenExpr, elseExpr ]
 
-        LambdaExpression lambda ->
-            [ lambda.expression ]
+        LambdaExpression { expression } ->
+            [ expression ]
 
         RecordAccess record _ ->
             [ record ]
@@ -106,138 +108,119 @@ expressionsInExpression expression =
             []
 
 
-updateExpressionsInExpression : (Node Expression -> Node Expression) -> Expression -> Expression
-updateExpressionsInExpression update expression =
-    let
-        updateExpressionsInRecordSetters =
-            List.map
-                (Node.map
-                    (\( field, expr ) ->
-                        ( field, expr |> update )
-                    )
-                )
-    in
-    case expression of
-        LetExpression letBlock ->
+{-| Map all immediate child expressions of an expression.
+-}
+mapSubexpressions : (Node Expression -> Node Expression) -> Expression -> Expression
+mapSubexpressions f e =
+    case e of
+        LetExpression { declarations, expression } ->
             let
-                updateExpressionInLetDeclaration letDeclaration =
-                    case letDeclaration of
+                mapSubexprs : LetDeclaration -> LetDeclaration
+                mapSubexprs d =
+                    case d of
                         LetFunction fun ->
                             LetFunction
                                 { fun
                                     | declaration =
-                                        fun.declaration
-                                            |> Node.map
-                                                (\f ->
-                                                    { f
-                                                        | expression =
-                                                            f.expression
-                                                                |> update
-                                                    }
-                                                )
+                                        Node.map
+                                            (\impl ->
+                                                { impl
+                                                    | expression =
+                                                        f impl.expression
+                                                }
+                                            )
+                                            fun.declaration
                                 }
 
-                        LetDestructuring pattern toDestructure ->
-                            LetDestructuring pattern (toDestructure |> update)
+                        LetDestructuring pattern expr ->
+                            LetDestructuring pattern (f expr)
             in
             LetExpression
                 { declarations =
-                    letBlock.declarations
-                        |> List.map
-                            (Node.map updateExpressionInLetDeclaration)
+                    List.map
+                        (Node.map mapSubexprs)
+                        declarations
                 , expression =
-                    letBlock.expression |> update
+                    f expression
                 }
 
-        ListExpr expressions ->
-            ListExpr
-                (expressions |> List.map update)
+        ListExpr exprs ->
+            ListExpr (List.map f exprs)
 
-        TupledExpression expressions ->
-            TupledExpression
-                (expressions |> List.map update)
+        TupledExpression exprs ->
+            TupledExpression (List.map f exprs)
 
         RecordExpr setters ->
-            RecordExpr
-                (setters |> updateExpressionsInRecordSetters)
+            RecordExpr (List.map (Node.map (Tuple.mapSecond f)) setters)
 
         RecordUpdateExpression record updaters ->
-            RecordUpdateExpression record
-                (updaters |> updateExpressionsInRecordSetters)
+            List.map (Node.map (Tuple.mapSecond f)) updaters
+                |> RecordUpdateExpression record
 
-        Application expressions ->
-            Application (expressions |> List.map update)
+        Application exprs ->
+            Application (List.map f exprs)
 
-        CaseExpression caseBlock ->
+        CaseExpression { expression, cases } ->
             CaseExpression
-                { expression = caseBlock.expression |> update
-                , cases =
-                    caseBlock.cases
-                        |> List.map
-                            (\( pattern, expr ) ->
-                                ( pattern, expr |> update )
-                            )
+                { expression = f expression
+                , cases = List.map (Tuple.mapSecond f) cases
                 }
 
-        OperatorApplication name dir aExpr bExpr ->
+        OperatorApplication name dir e1 e2 ->
             OperatorApplication name
                 dir
-                (aExpr |> update)
-                (bExpr |> update)
+                (f e1)
+                (f e2)
 
-        IfBlock boolExpr thenExpr elseExpr ->
-            IfBlock (boolExpr |> update)
-                (thenExpr |> update)
-                (elseExpr |> update)
+        IfBlock predExpr thenExpr elseExpr ->
+            IfBlock (f predExpr)
+                (f thenExpr)
+                (f elseExpr)
 
         LambdaExpression lambda ->
-            LambdaExpression
-                { lambda
-                    | expression =
-                        lambda.expression |> update
-                }
+            LambdaExpression { lambda | expression = f lambda.expression }
 
         RecordAccess record fieldName ->
-            RecordAccess (record |> update) fieldName
+            RecordAccess (f record) fieldName
 
         ParenthesizedExpression expr ->
-            ParenthesizedExpression (expr |> update)
+            ParenthesizedExpression (f expr)
 
         Negation expr ->
-            Negation (expr |> update)
+            Negation (f expr)
 
         UnitExpr ->
-            expression
+            e
 
         Integer _ ->
-            expression
+            e
 
         Hex _ ->
-            expression
+            e
 
         Floatable _ ->
-            expression
+            e
 
         Literal _ ->
-            expression
+            e
 
         CharLiteral _ ->
-            expression
+            e
 
         GLSLExpression _ ->
-            expression
+            e
 
         RecordAccessFunction _ ->
-            expression
+            e
 
         FunctionOrValue _ _ ->
-            expression
+            e
 
         Operator _ ->
-            expression
+            e
 
         PrefixOperator _ ->
-            expression
+            e
 
 
 {-| There are places where only variable patterns can be, not any pattern:
@@ -248,7 +231,8 @@ updateExpressionsInExpression update expression =
 
   - `AnnotatedLetVar`:
 
-        let ... : ...
+        let
+            here : ...
             here = ...
         in
 
@@ -288,7 +272,7 @@ allVarsInPattern :
             }
 allVarsInPattern pattern =
     let
-        step =
+        go =
             List.concatMap
                 allVarsInPattern
 
@@ -300,20 +284,19 @@ allVarsInPattern pattern =
     in
     case Node.value pattern of
         ListPattern elementPatterns ->
-            elementPatterns |> step
+            go elementPatterns
 
         TuplePattern subPatterns ->
-            subPatterns |> step
+            go subPatterns
 
         RecordPattern fieldPatterns ->
-            fieldPatterns
-                |> List.map (ofKind FieldPattern)
+            List.map (ofKind FieldPattern) fieldPatterns
 
         NamedPattern _ subPatterns ->
-            subPatterns |> step
+            go subPatterns
 
         UnConsPattern headPattern tailPattern ->
-            [ headPattern, tailPattern ] |> step
+            go [ headPattern, tailPattern ]
 
         VarPattern name ->
             [ { name = name
@@ -323,11 +306,10 @@ allVarsInPattern pattern =
             ]
 
         AsPattern pattern_ afterAs ->
-            ([ pattern_ ] |> step)
-                |> (::) (afterAs |> ofKind VarAfterAs)
+            ofKind VarAfterAs afterAs :: go [ pattern_ ]
 
         ParenthesizedPattern innerPattern ->
-            [ innerPattern ] |> step
+            go [ innerPattern ]
 
         AllPattern ->
             []
@@ -365,7 +347,7 @@ usesIn expression matchName =
                 0
 
         _ ->
-            expressionsInExpression expression
+            subexpressions expression
                 |> List.map
                     (\(Node _ expr) ->
                         usesIn expr matchName
