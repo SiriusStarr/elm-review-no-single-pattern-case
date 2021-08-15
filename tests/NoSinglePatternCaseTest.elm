@@ -634,6 +634,6 @@ error : String -> Review.Test.ExpectedError
 error under =
     Review.Test.error
         { message = "Single pattern case block."
-        , details = [ "Single pattern case blocks are either unnecessary or overly verbose.  There's usually a more concise way to destructure, e.g. in a function argument, so consider refactoring." ]
+        , details = [ "Single pattern case blocks typically are either unnecessary or overly verbose.  There's usually a more concise way to destructure, e.g. in a function argument, so consider refactoring." ]
         , under = under
         }
