@@ -246,7 +246,7 @@ withUnpacked o =
                                             { argumentAlsoUsedElsewhere =
                                                 destructureInExistingLetsInstead
                                                     { noExistingLets = destructureAs }
-                                            , notDestructable = noFix
+                                            , notDestructurable = noFix
                                             }
                                             |> noFixOnNameClash
                                         )
@@ -287,7 +287,7 @@ withUnpacked o =
                                                     { noExistingLets =
                                                         destructureAs
                                                     }
-                                            , notDestructable = noFix
+                                            , notDestructurable = noFix
                                             }
                                             |> noFixOnNameClash
                                         )

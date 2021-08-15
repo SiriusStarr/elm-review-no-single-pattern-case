@@ -174,7 +174,7 @@ options:
               - | `noExistingLets`
                   - [`destructureAs`](NoSinglePatternCase#destructureAs)
                   - [_"only separate let fix left"_](#only-separate-let-fix-left)
-      - | `notDestructable` -- If in `case` and `of` is not just an argument or if the argument pattern is a record field pattern or `as` destructured
+      - | `notDestructurable` -- If in `case` and `of` is not just an argument or if the argument pattern is a record field pattern or `as` destructured
           - [`destructureInExistingLets`](NoSinglePatternCase#destructureInExistingLets)
               - | If no lets exist, use [_"only separate let fix left"_](#only-separate-let-fix-left)
           - [_"only separate let fix left"_](#only-separate-let-fix-left)
@@ -263,7 +263,7 @@ type Fix separateLetUsed
     | FixByDestructuringTheArgument
         { argumentAlsoUsedElsewhere :
             ArgumentAlsoUsedElsewhere separateLetUsed
-        , notDestructable :
+        , notDestructurable :
             --| If in `case` and `of` isn't just an argument or
             --| record field pattern or `as` destructured
             OnlyFixInSeparateLetLeftFixOr
@@ -446,7 +446,7 @@ options:
           - | `noExistingLets`
               - [`destructureAs`](NoSinglePatternCase#destructureAs)
               - your fix for the situation "only separate let fix left"
-  - | `notDestructable` -- If the expression in `case` and `of` is not an argument or the argument pattern is a record field pattern or `as` destructured
+  - | `notDestructurable` -- If the expression in `case` and `of` is not an argument or the argument pattern is a record field pattern or `as` destructured
       - [`destructureInExistingLets`](NoSinglePatternCase#destructureInExistingLets)
           - | If no lets exist, use your fix for the situation "only separate let fix left"
       - your fix for the situation "only separate let fix left"
@@ -458,7 +458,7 @@ For example
             { argumentAlsoUsedElsewhere =
                 destructureInExistingLetsInstead
                     { noExistingLets = createSeparateLet }
-            , notDestructable =
+            , notDestructurable =
                 destructureInExistingLets
             }
             |> createSeparateLetOnNameClash
@@ -467,7 +467,7 @@ For example
 fixByDestructuringTheArgument :
     { argumentAlsoUsedElsewhere :
         ArgumentAlsoUsedElsewhere separateLetUsed
-    , notDestructable :
+    , notDestructurable :
         OnlyFixInSeparateLetLeftFixOr
             DestructureInExistingLets
             separateLetUsed
@@ -504,7 +504,7 @@ For example
 
     fixByDestructuringTheArgument
         { argumentAlsoUsedElsewhere = destructureAsInstead
-        , notDestructable =
+        , notDestructurable =
             destructureInExistingLets
         }
 
@@ -706,7 +706,7 @@ Equivalent to
 
     fixByDestructuringTheArgument
         { argumentAlsoUsedElsewhere = destructureAsInstead
-        , notDestructable = noFix
+        , notDestructurable = noFix
         }
         |> noFixOnNameClash
 
@@ -715,7 +715,7 @@ alwaysFixInArgument : Config DontCreateSeparateLet
 alwaysFixInArgument =
     fixByDestructuringTheArgument
         { argumentAlsoUsedElsewhere = destructureAsInstead
-        , notDestructable = noFix
+        , notDestructurable = noFix
         }
         |> noFixOnNameClash
 
@@ -782,7 +782,7 @@ checkDeclaration config declaration =
                     fun.declaration |> Node.value
             in
             expression
-                |> checkEpression config
+                |> checkExpression config
                     { vars =
                         arguments
                             |> List.concatMap allVarsInPattern
@@ -807,7 +807,7 @@ inScope scope { name, nameRange, kind } =
     }
 
 
-checkEpression :
+checkExpression :
     Config separateLetUsed
     ->
         { vars :
@@ -826,10 +826,10 @@ checkEpression :
         }
     -> Node Expression
     -> List (Error {})
-checkEpression config { vars, mostInnerLetBlock } expressionNode =
+checkExpression config { vars, mostInnerLetBlock } expressionNode =
     let
         checkExpressionHereWith { extraPatterns, newMostInnerLetBlock } =
-            checkEpression config
+            checkExpression config
                 { vars =
                     vars
                         ++ (extraPatterns
@@ -1004,7 +1004,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                                     )
                         }
 
-                FixByDestructuringTheArgument { argumentAlsoUsedElsewhere, notDestructable } ->
+                FixByDestructuringTheArgument { argumentAlsoUsedElsewhere, notDestructurable } ->
                     case isDestructurable expressionInCaseOf of
                         Destructurable varInCaseOf ->
                             replaceVarPatternFixIfUsedOnce varInCaseOf
@@ -1025,7 +1025,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                                 }
 
                         NotDestructurable ->
-                            notDestructable
+                            notDestructurable
                                 |> onlyCreatingSeparateLetLeftFixOr
                                     (\DestructureInExistingLets ->
                                         fixInExistingLets
@@ -1212,7 +1212,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
     Rule.errorWithFix errorInfo caseRange fix
 
 
-type IsDestructable
+type IsDestructurable
     = Destructurable
         { name : String
         , nameRange : Range
