@@ -43,13 +43,11 @@ module NoSinglePatternCase exposing
 -}
 
 import Elm.CodeGen exposing (asPattern, letDestructuring, letExpr)
-import Elm.Pretty exposing (prettyExpression)
 import Elm.Syntax.Declaration exposing (Declaration(..))
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Pattern exposing (Pattern(..))
 import Elm.Syntax.Range exposing (Range, emptyRange)
-import Pretty exposing (pretty)
 import Review.Fix as Fix
 import Review.Rule as Rule exposing (Error, Rule)
 import SyntaxHelp
@@ -58,6 +56,7 @@ import SyntaxHelp
         , allVarsInPattern
         , mapSubexpressions
         , parensAroundNamedPattern
+        , prettyExpressionReplacing
         , prettyPrintPattern
         , subexpressions
         , usesIn
@@ -1229,37 +1228,3 @@ type IsDestructurable
         , scope : Expression
         }
     | NotDestructurable
-
-
-{-| Replace a range with a provided expression, pretty-printing and indenting
-the result.
--}
-prettyExpressionReplacing : Range -> Expression -> String
-prettyExpressionReplacing replacedRange =
-    prettyExpression
-        >> pretty 120
-        >> reindent replacedRange.start.column
-
-
-{-| Re-indent a section of generated code to ensure that it doesn't cause issues
-when used as a fix.
--}
-reindent : Int -> String -> String
-reindent amount =
-    let
-        indent : String
-        indent =
-            String.repeat (amount - 1) " "
-    in
-    String.lines
-        >> List.map
-            (\l ->
-                -- Don't indent empty lines
-                if String.isEmpty l then
-                    l
-
-                else
-                    indent ++ l
-            )
-        >> String.join "\n"
-        >> String.trimLeft

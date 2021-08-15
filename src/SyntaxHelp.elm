@@ -3,13 +3,14 @@ module SyntaxHelp exposing
     , allVarsInPattern
     , mapSubexpressions
     , parensAroundNamedPattern
+    , prettyExpressionReplacing
     , prettyPrintPattern
     , subexpressions
     , usesIn
     )
 
 import Elm.CodeGen exposing (parensPattern, val)
-import Elm.Pretty exposing (prettyPattern)
+import Elm.Pretty exposing (prettyExpression, prettyPattern)
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Pattern exposing (Pattern(..))
@@ -388,9 +389,11 @@ This method displays the actual `(inner)`. It's the same with `AsPattern`.
 prettyPrintPattern : Int -> Pattern -> String
 prettyPrintPattern width pattern =
     let
+        printedPattern : String
         printedPattern =
             pattern |> prettyPattern |> pretty width
 
+        inParens : String
         inParens =
             "(" ++ printedPattern ++ ")"
     in
@@ -403,3 +406,37 @@ prettyPrintPattern width pattern =
 
         _ ->
             printedPattern
+
+
+{-| Replace a range with a provided expression, pretty-printing and indenting
+the result.
+-}
+prettyExpressionReplacing : Range -> Expression -> String
+prettyExpressionReplacing replacedRange =
+    prettyExpression
+        >> pretty 120
+        >> reindent replacedRange.start.column
+
+
+{-| Re-indent a section of generated code to ensure that it doesn't cause issues
+when used as a fix.
+-}
+reindent : Int -> String -> String
+reindent amount =
+    let
+        indent : String
+        indent =
+            String.repeat (amount - 1) " "
+    in
+    String.lines
+        >> List.map
+            (\l ->
+                -- Don't indent empty lines
+                if String.isEmpty l then
+                    l
+
+                else
+                    indent ++ l
+            )
+        >> String.join "\n"
+        >> String.trimLeft
