@@ -1222,20 +1222,35 @@ type IsDestructurable
     | NotDestructurable
 
 
+{-| Replace a range with a provided expression, pretty-printing and indenting
+the result.
+-}
 prettyExpressionReplacing : Range -> Expression -> String
 prettyExpressionReplacing replacedRange =
     prettyExpression
         >> pretty 120
-        >> adaptIndentation replacedRange
+        >> reindent replacedRange.start.column
 
 
-adaptIndentation : Range -> String -> String
-adaptIndentation previousRange =
-    -- hacky but works
+{-| Re-indent a section of generated code to ensure that it doesn't cause issues
+when used as a fix.
+-}
+reindent : Int -> String -> String
+reindent amount =
     let
-        indentation =
-            previousRange.start.column - 1
+        indent : String
+        indent =
+            String.repeat (amount - 1) " "
     in
-    String.split "\n"
-        >> String.join
-            ("\n" ++ String.repeat indentation " ")
+    String.lines
+        >> List.map
+            (\l ->
+                -- Don't indent empty lines
+                if String.isEmpty l then
+                    l
+
+                else
+                    indent ++ l
+            )
+        >> String.join "\n"
+        >> String.trimLeft

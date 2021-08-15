@@ -262,7 +262,7 @@ withUnpacked o =
     let
         foo =
             bar
-    
+
         (Opaque i) =
             o
     in
@@ -450,7 +450,7 @@ unpack o =
     let
         foo =
             bar
-    
+
         (Opaque i) =
             o
     in
