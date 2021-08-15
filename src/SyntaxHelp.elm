@@ -356,7 +356,8 @@ allVarsInPattern pattern =
 usesIn : Expression -> String -> number_
 usesIn expression matchName =
     case expression of
-        FunctionOrValue _ name ->
+        -- If the name is qualified, it isn't a variable
+        FunctionOrValue [] name ->
             if name == matchName then
                 1
 

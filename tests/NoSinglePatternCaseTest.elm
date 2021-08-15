@@ -199,6 +199,30 @@ unpack ((Opaque ii) as oo) =
     unpacked
 """
                             ]
+            , test "name is used but does not refer to arg" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
+
+withUnpacked : Opaque -> ( Int, List Int )
+withUnpacked map =
+    case map of
+        Opaque i -> ( i, List.map ((+) 1) [ 1 ] )
+"""
+                        |> Review.Test.run (rule alwaysFixInArgument)
+                        |> Review.Test.expectErrors
+                            [ error """case map of
+        Opaque i -> ( i, List.map ((+) 1) [ 1 ] )"""
+                                |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+withUnpacked : Opaque -> ( Int, List Int )
+withUnpacked (Opaque i) =
+    ( i, List.map ((+) 1) [ 1 ] )
+"""
+                            ]
             ]
         , describe "not possible"
             [ describe "because the variable in case and of is used multiple times"
