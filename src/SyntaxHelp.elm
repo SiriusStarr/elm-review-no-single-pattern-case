@@ -1,5 +1,6 @@
 module SyntaxHelp exposing
-    ( allBindingsInPattern
+    ( Binding
+    , allBindingsInPattern
     , doesPatternDefineVariables
     , mapSubexpressions
     , parensAroundNamedPattern
@@ -228,19 +229,19 @@ mapSubexpressions f e =
 {-| Recursively find all bindings in a pattern and save whether or not
 destructuring could occur at the pattern.
 -}
-allBindingsInPattern : Node Pattern -> List ( String, { nameRange : Range, canDestructureAt : Bool } )
-allBindingsInPattern pattern =
+allBindingsInPattern : Expression -> Node Pattern -> List ( String, Binding )
+allBindingsInPattern scope pattern =
     let
-        go : List (Node Pattern) -> List ( String, { nameRange : Range, canDestructureAt : Bool } )
+        go : List (Node Pattern) -> List ( String, Binding )
         go =
-            List.concatMap
-                allBindingsInPattern
+            List.concatMap (allBindingsInPattern scope)
 
-        makeBinding : Bool -> Node String -> ( String, { nameRange : Range, canDestructureAt : Bool } )
+        makeBinding : Bool -> Node String -> ( String, Binding )
         makeBinding canDestructureAt name =
             ( Node.value name
-            , { nameRange = Node.range name
+            , { patternNodeRange = Node.range name
               , canDestructureAt = canDestructureAt
+              , scope = scope
               }
             )
     in
@@ -262,8 +263,9 @@ allBindingsInPattern pattern =
 
         VarPattern name ->
             [ ( name
-              , { nameRange = Node.range pattern
+              , { patternNodeRange = Node.range pattern
                 , canDestructureAt = True
+                , scope = scope
                 }
               )
             ]
@@ -333,6 +335,20 @@ doesPatternDefineVariables pattern =
 
         _ ->
             True
+
+
+{-| A binding with some scope.
+
+  - `patternNodeRange` -- The `Range` for the binding location.
+  - `canDestructureAt` -- Whether or not the binding can be destructured at.
+  - `scope` -- The scope the binding is bound within.
+
+-}
+type alias Binding =
+    { patternNodeRange : Range
+    , canDestructureAt : Bool
+    , scope : Expression
+    }
 
 
 {-| `case of` patterns that look like

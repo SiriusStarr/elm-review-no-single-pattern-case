@@ -248,6 +248,63 @@ withUnpacked : Opaque -> ( Int, Opaque )
 withUnpacked ((Opaque i) as o) =
     ( i, o )
 """ ]
+                , test "can destructure in case pattern" <|
+                    \() ->
+                        """module A exposing (..)
+
+type Opaque = Opaque Int
+
+type AOrB = A Opaque | B Opaque
+
+withUnpacked : AOrB -> ( Int, Opaque )
+withUnpacked aOrB =
+    case aOrB of
+        A o ->
+            case o of
+                Opaque i -> ( i + 1, o )
+        B o ->
+            case o of
+                Opaque i -> ( i - 1, o )
+"""
+                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.expectErrors
+                                [ error """case o of
+                Opaque i -> ( i + 1, o )"""
+                                    |> Review.Test.whenFixed
+                                        """module A exposing (..)
+
+type Opaque = Opaque Int
+
+type AOrB = A Opaque | B Opaque
+
+withUnpacked : AOrB -> ( Int, Opaque )
+withUnpacked aOrB =
+    case aOrB of
+        A ((Opaque i) as o) ->
+            ( i + 1, o )
+        B o ->
+            case o of
+                Opaque i -> ( i - 1, o )
+"""
+                                , error """case o of
+                Opaque i -> ( i - 1, o )"""
+                                    |> Review.Test.whenFixed
+                                        """module A exposing (..)
+
+type Opaque = Opaque Int
+
+type AOrB = A Opaque | B Opaque
+
+withUnpacked : AOrB -> ( Int, Opaque )
+withUnpacked aOrB =
+    case aOrB of
+        A o ->
+            case o of
+                Opaque i -> ( i + 1, o )
+        B ((Opaque i) as o) ->
+            ( i - 1, o )
+"""
+                                ]
                 , describe "existing lets used"
                     [ test "possible" <|
                         \() ->

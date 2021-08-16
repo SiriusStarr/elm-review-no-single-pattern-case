@@ -47,13 +47,14 @@ import Elm.CodeGen exposing (asPattern, letDestructuring, letExpr)
 import Elm.Syntax.Declaration exposing (Declaration(..))
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node(..))
-import Elm.Syntax.Pattern exposing (Pattern(..))
+import Elm.Syntax.Pattern exposing (Pattern)
 import Elm.Syntax.Range exposing (Range, emptyRange)
 import Review.Fix as Fix
 import Review.Rule as Rule exposing (Error, Rule)
 import SyntaxHelp
     exposing
-        ( allBindingsInPattern
+        ( Binding
+        , allBindingsInPattern
         , doesPatternDefineVariables
         , mapSubexpressions
         , parensAroundNamedPattern
@@ -778,42 +779,26 @@ alwaysFixInLet =
         |> createSeparateLetOnNameClash
 
 
-
---
-
-
-{-| Check a `Declaration` for single-pattern cases.
+{-| Check a TLD for single-pattern cases.
 -}
 checkDeclaration : Config separateLetUsed -> Declaration -> List (Error {})
-checkDeclaration config declaration =
-    case declaration of
-        FunctionDeclaration fun ->
+checkDeclaration config d =
+    case d of
+        FunctionDeclaration { declaration } ->
             let
                 { expression, arguments } =
-                    fun.declaration |> Node.value
+                    Node.value declaration
             in
-            expression
-                |> checkExpression config
-                    { bindings =
-                        arguments
-                            |> List.concatMap allBindingsInPattern
-                            |> List.map (Tuple.mapSecond (addScope (Node.value expression)))
-                            |> Dict.fromList
-                    , closestLetBlock = Nothing
-                    }
+            checkExpression config
+                { bindings =
+                    List.concatMap (allBindingsInPattern (Node.value expression)) arguments
+                        |> Dict.fromList
+                , closestLetBlock = Nothing
+                }
+                expression
 
         _ ->
             []
-
-
-{-| Add the scope a binding is defined for.
--}
-addScope : Expression -> { nameRange : Range, canDestructureAt : Bool } -> { nameRange : Range, canDestructureAt : Bool, scope : Expression }
-addScope scope { nameRange, canDestructureAt } =
-    { nameRange = nameRange
-    , canDestructureAt = canDestructureAt
-    , scope = scope
-    }
 
 
 type alias LocalContext =
@@ -835,26 +820,22 @@ checkExpression config ({ bindings, closestLetBlock } as context) expressionNode
         checkExpressionHereWith { extraPatterns, newClosestLetBlock } =
             checkExpression config
                 { bindings =
-                    Dict.union bindings
-                        (extraPatterns
-                            |> List.map
-                                (Tuple.mapSecond (addScope (Node.value expressionNode)))
-                            |> Dict.fromList
-                        )
+                    Dict.fromList extraPatterns
+                        |> Dict.union bindings
                 , closestLetBlock =
                     case newClosestLetBlock of
                         Just { expression, declarations } ->
-                            { blockRange = Node.range expressionNode
-                            , expression = expression
-                            , declarations = declarations |> List.map Node.value
-                            }
-                                |> Just
+                            Just
+                                { blockRange = Node.range expressionNode
+                                , expression = expression
+                                , declarations = List.map Node.value declarations
+                                }
 
                         Nothing ->
                             closestLetBlock
                 }
 
-        checkExpressionHere extraPatterns =
+        go extraPatterns =
             checkExpressionHereWith
                 { extraPatterns = extraPatterns
                 , newClosestLetBlock = Nothing
@@ -877,8 +858,9 @@ checkExpression config ({ bindings, closestLetBlock } as context) expressionNode
                 multipleCases ->
                     multipleCases
                         |> List.concatMap
-                            (\( _, expr ) ->
-                                expr |> checkExpressionHere []
+                            (\( p, e ) ->
+                                -- Add pattern match bindings
+                                go (allBindingsInPattern (Node.value e) p) e
                             )
 
         LetExpression letBlock ->
@@ -886,31 +868,24 @@ checkExpression config ({ bindings, closestLetBlock } as context) expressionNode
                 newVarsInLetDeclaration (Node _ letDeclaration) =
                     case letDeclaration of
                         LetDestructuring pattern _ ->
-                            allBindingsInPattern pattern
+                            allBindingsInPattern (Node.value expressionNode) pattern
 
                         LetFunction fun ->
                             let
-                                declaration =
-                                    fun.declaration |> Node.value
+                                { name } =
+                                    Node.value fun.declaration
                             in
-                            ( declaration.name |> Node.value
-                            , { nameRange = declaration.name |> Node.range
-                              , canDestructureAt = fun.signature == Nothing
-                              }
-                            )
-                                |> List.singleton
-
-                newVarsInLetBlock =
-                    letBlock.declarations
-                        |> List.concatMap newVarsInLetDeclaration
-
-                checkDeclarations =
-                    letBlock.declarations
-                        |> List.concatMap checkLetDeclaration
+                            [ ( Node.value name
+                              , { patternNodeRange = Node.range name
+                                , canDestructureAt = fun.signature == Nothing
+                                , scope = Node.value expressionNode
+                                }
+                              )
+                            ]
 
                 checkExpressionInThisLetBlock newPatterns =
                     checkExpressionHereWith
-                        { extraPatterns = newVarsInLetBlock ++ newPatterns
+                        { extraPatterns = List.concatMap newVarsInLetDeclaration letBlock.declarations ++ newPatterns
                         , newClosestLetBlock = Just letBlock
                         }
 
@@ -918,32 +893,24 @@ checkExpression config ({ bindings, closestLetBlock } as context) expressionNode
                     case letDeclaration of
                         LetFunction fun ->
                             let
-                                declaration =
-                                    fun.declaration |> Node.value
+                                { expression, arguments } =
+                                    Node.value fun.declaration
                             in
-                            declaration.expression
-                                |> checkExpressionInThisLetBlock
-                                    (declaration.arguments
-                                        |> List.concatMap allBindingsInPattern
-                                    )
+                            checkExpressionInThisLetBlock
+                                (arguments
+                                    |> List.concatMap (allBindingsInPattern (Node.value expression))
+                                )
+                                expression
 
                         LetDestructuring _ expr ->
-                            expr |> checkExpressionInThisLetBlock []
+                            checkExpressionInThisLetBlock [] expr
             in
-            letBlock.expression
-                |> checkExpressionInThisLetBlock []
-                |> (++) checkDeclarations
+            checkExpressionInThisLetBlock [] letBlock.expression
+                ++ List.concatMap checkLetDeclaration letBlock.declarations
 
         otherExpression ->
             subexpressions otherExpression
-                |> List.concatMap (checkExpressionHere [])
-
-
-type alias Binding =
-    { nameRange : Range
-    , canDestructureAt : Bool
-    , scope : Expression
-    }
+                |> List.concatMap (go [])
 
 
 type alias SinglePatternCaseInfo =
@@ -1032,7 +999,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
             case usesIn varInCaseOf.scope varInCaseOf.name of
                 1 ->
                     replaceVarPatternFix
-                        { varRange = varInCaseOf.nameRange
+                        { varRange = varInCaseOf.patternNodeRange
                         , varPatternScope = varInCaseOf.scope
                         }
 
@@ -1044,11 +1011,11 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                 FunctionOrValue [] varName ->
                     Dict.get varName context.bindings
                         |> Maybe.andThen
-                            (\{ nameRange, canDestructureAt, scope } ->
+                            (\{ patternNodeRange, canDestructureAt, scope } ->
                                 if canDestructureAt then
                                     Just
                                         { name = varName
-                                        , nameRange = nameRange
+                                        , patternNodeRange = patternNodeRange
                                         , scope = scope
                                         }
 
@@ -1090,14 +1057,14 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                 )
 
         replaceUselessCase { notUseless } pattern =
-            if pattern |> doesPatternDefineVariables then
+            if doesPatternDefineVariables pattern then
                 notUseless
 
             else
                 [ replaceCaseWithExpressionAfterThePattern ]
 
         noNameClashIn scope =
-            allBindingsInPattern singleCasePatternNode
+            allBindingsInPattern singleCaseExpression singleCasePatternNode
                 |> List.all
                     (Tuple.first >> usesIn scope >> (==) 1)
 
@@ -1108,13 +1075,13 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
             else
                 onlySeparateLetFixLeftFix ()
 
-        destructureAsFix { name, nameRange, scope } =
+        destructureAsFix { name, patternNodeRange, scope } =
             singleCasePattern
                 |> replaceUselessCase
                     { notUseless =
                         onlySeparateLetFixLeftFixIfNameClashIn scope
                             { noClash =
-                                [ Fix.replaceRangeBy nameRange
+                                [ Fix.replaceRangeBy patternNodeRange
                                     (asPattern singleCasePattern name
                                         |> prettyPrintPattern 120
                                     )
