@@ -54,13 +54,13 @@ import Review.Rule as Rule exposing (Error, Rule)
 import SyntaxHelp
     exposing
         ( Binding
+        , addParensToNamedPattern
         , allBindingsInPattern
+        , countUsesIn
         , mapSubexpressions
-        , parensAroundNamedPattern
         , prettyExpressionReplacing
         , prettyPrintPattern
         , subexpressions
-        , usesIn
         )
 
 
@@ -989,7 +989,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                                     )
 
         replaceVarPatternFixIfUsedOnce varInCaseOf { usedOften } =
-            case usesIn varInCaseOf.scope varInCaseOf.name of
+            case countUsesIn varInCaseOf.scope varInCaseOf.name of
                 1 ->
                     replaceVarPatternFix
                         { varRange = varInCaseOf.patternNodeRange
@@ -1060,7 +1060,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
         noNameClashIn scope =
             allBindingsInPattern singleCaseExpression singleCasePattern
                 |> List.all
-                    (Tuple.first >> usesIn scope >> (==) 1)
+                    (Tuple.first >> countUsesIn scope >> (==) 1)
 
         onlySeparateLetFixLeftFixIfNameClashIn scope { noClash } =
             if noNameClashIn scope then
@@ -1103,7 +1103,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                 (letExpr
                     (letBlock.declarations
                         ++ [ letDestructuring
-                                (parensAroundNamedPattern <| Node.value pattern)
+                                (addParensToNamedPattern <| Node.value pattern)
                                 expressionInCaseOf
                            ]
                     )
@@ -1130,7 +1130,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                     [ Fix.replaceRangeBy varRange
                         (singleCasePattern
                             |> Node.value
-                            |> parensAroundNamedPattern
+                            |> addParensToNamedPattern
                             |> prettyPrintPattern 120
                         )
                     , replaceCaseWithExpressionAfterThePattern
@@ -1144,7 +1144,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                         [ Fix.replaceRangeBy caseRange
                             (letExpr
                                 [ letDestructuring
-                                    (parensAroundNamedPattern <| Node.value singleCasePattern)
+                                    (addParensToNamedPattern <| Node.value singleCasePattern)
                                     expressionInCaseOf
                                 ]
                                 singleCaseExpression

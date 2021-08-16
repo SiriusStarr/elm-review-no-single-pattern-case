@@ -1,18 +1,18 @@
 module SyntaxHelp exposing
     ( Binding
+    , addParensToNamedPattern
     , allBindingsInPattern
+    , countUsesIn
     , mapSubexpressions
-    , parensAroundNamedPattern
     , prettyExpressionReplacing
     , prettyPrintPattern
     , subexpressions
-    , usesIn
     )
 
 import Elm.CodeGen exposing (parensPattern, val)
 import Elm.Pretty exposing (prettyExpression, prettyPattern)
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
-import Elm.Syntax.Node as Node exposing (Node(..))
+import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern(..))
 import Elm.Syntax.Range exposing (Range)
 import Pretty exposing (pretty)
@@ -297,26 +297,23 @@ allBindingsInPattern scope pattern =
             []
 
 
-{-| Count the uses of a given name (defined variables with this name) in the scope of the expression.
+{-| Count the uses of a given name in the scope of an expression.
 -}
-usesIn : Expression -> String -> number_
-usesIn expression matchName =
-    case expression of
+countUsesIn : Expression -> String -> number_
+countUsesIn expr name =
+    case expr of
         -- If the name is qualified, it isn't a variable
-        FunctionOrValue [] name ->
-            if name == matchName then
+        FunctionOrValue [] n ->
+            if n == name then
                 1
 
             else
                 0
 
         _ ->
-            subexpressions expression
-                |> List.map
-                    (\(Node _ expr) ->
-                        usesIn expr matchName
-                    )
-                |> List.sum
+            subexpressions expr
+                -- Count and sum in one pass
+                |> List.foldl (\e -> (+) (countUsesIn (Node.value e) name)) 0
 
 
 {-| A binding with some scope.
@@ -333,35 +330,34 @@ type alias Binding =
     }
 
 
-{-| `case of` patterns that look like
+{-| Named patterns that occur in e.g. function arguments must be surrounded by
+parentheses, unlike in `case` patterns. This function wraps them accordingly,
+e.g. for:
 
-    case opaque of
-        Opaque i ->
-            i
+    f o =
+        case o of
+            Opaque i ->
+                i
 
-can't be used like this in a let destructuring, lambda or argument:
+vs
 
-    unpack Opaque i =
-        i
-
-so run `parensAroundNamedPattern` to turn possible `NamedPattern`s into `ParenthesizedPattern`.
-
-    unpack (Opaque i) =
+    f (Opaque i) =
         i
 
 -}
-parensAroundNamedPattern : Pattern -> Pattern
-parensAroundNamedPattern casePattern =
-    case casePattern of
+addParensToNamedPattern : Pattern -> Pattern
+addParensToNamedPattern p =
+    case p of
         NamedPattern _ _ ->
-            parensPattern casePattern
+            parensPattern p
 
         _ ->
-            casePattern
+            p
 
 
-{-| If you call `Elm.Pretty.prettyPattern` on `ParenthesizedPattern inner`, `inner` is the result.
-This method displays the actual `(inner)`. It's the same with `AsPattern`.
+{-| If you call `Elm.Pretty.prettyPattern` on `ParenthesizedPattern inner`,
+`inner` is the result. This method displays the actual `(inner)` instead, as
+well as putting parentheses around `as` patterns.
 -}
 prettyPrintPattern : Int -> Pattern -> String
 prettyPrintPattern width pattern =
