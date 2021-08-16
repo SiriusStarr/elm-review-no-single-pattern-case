@@ -1,7 +1,6 @@
 module SyntaxHelp exposing
     ( Binding
     , allBindingsInPattern
-    , doesPatternDefineVariables
     , mapSubexpressions
     , parensAroundNamedPattern
     , prettyExpressionReplacing
@@ -318,23 +317,6 @@ usesIn expression matchName =
                         usesIn expr matchName
                     )
                 |> List.sum
-
-
-doesPatternDefineVariables : Pattern -> Bool
-doesPatternDefineVariables pattern =
-    case pattern of
-        AllPattern ->
-            False
-
-        UnitPattern ->
-            False
-
-        NamedPattern _ subpatterns ->
-            subpatterns
-                |> List.any (doesPatternDefineVariables << Node.value)
-
-        _ ->
-            True
 
 
 {-| A binding with some scope.

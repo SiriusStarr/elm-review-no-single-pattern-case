@@ -55,7 +55,6 @@ import SyntaxHelp
     exposing
         ( Binding
         , allBindingsInPattern
-        , doesPatternDefineVariables
         , mapSubexpressions
         , parensAroundNamedPattern
         , prettyExpressionReplacing
@@ -932,14 +931,8 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
             , details = [ "Single pattern case blocks typically are either unnecessary or overly verbose.  There's usually a more concise way to destructure, e.g. in a function argument, so consider refactoring." ]
             }
 
-        { context, expressionInCaseOf, singleCaseExpression, caseRange } =
+        { context, expressionInCaseOf, singleCaseExpression, caseRange, singleCasePattern } =
             information
-
-        singleCasePatternNode =
-            information.singleCasePattern
-
-        singleCasePattern =
-            Node.value singleCasePatternNode
 
         fix =
             case fixKind of
@@ -1057,14 +1050,15 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                 )
 
         replaceUselessCase { notUseless } pattern =
-            if doesPatternDefineVariables pattern then
-                notUseless
-
-            else
+            -- Just use unit as "scope" here since all we care about is if any bindings are made
+            if List.isEmpty <| allBindingsInPattern UnitExpr pattern then
                 [ replaceCaseWithExpressionAfterThePattern ]
 
+            else
+                notUseless
+
         noNameClashIn scope =
-            allBindingsInPattern singleCaseExpression singleCasePatternNode
+            allBindingsInPattern singleCaseExpression singleCasePattern
                 |> List.all
                     (Tuple.first >> usesIn scope >> (==) 1)
 
@@ -1082,7 +1076,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                         onlySeparateLetFixLeftFixIfNameClashIn scope
                             { noClash =
                                 [ Fix.replaceRangeBy patternNodeRange
-                                    (asPattern singleCasePattern name
+                                    (asPattern (Node.value singleCasePattern) name
                                         |> prettyPrintPattern 120
                                     )
                                 , replaceCaseWithExpressionAfterThePattern
@@ -1109,7 +1103,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                 (letExpr
                     (letBlock.declarations
                         ++ [ letDestructuring
-                                (pattern |> parensAroundNamedPattern)
+                                (parensAroundNamedPattern <| Node.value pattern)
                                 expressionInCaseOf
                            ]
                     )
@@ -1135,6 +1129,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                 { noClash =
                     [ Fix.replaceRangeBy varRange
                         (singleCasePattern
+                            |> Node.value
                             |> parensAroundNamedPattern
                             |> prettyPrintPattern 120
                         )
@@ -1149,7 +1144,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                         [ Fix.replaceRangeBy caseRange
                             (letExpr
                                 [ letDestructuring
-                                    (singleCasePattern |> parensAroundNamedPattern)
+                                    (parensAroundNamedPattern <| Node.value singleCasePattern)
                                     expressionInCaseOf
                                 ]
                                 singleCaseExpression
