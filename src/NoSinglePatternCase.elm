@@ -54,6 +54,7 @@ import Review.Rule as Rule exposing (Error, Rule)
 import SyntaxHelp
     exposing
         ( allBindingsInPattern
+        , doesPatternDefineVariables
         , mapSubexpressions
         , parensAroundNamedPattern
         , prettyExpressionReplacing
@@ -1089,15 +1090,11 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                 )
 
         replaceUselessCase { notUseless } pattern =
-            case pattern of
-                AllPattern ->
-                    [ replaceCaseWithExpressionAfterThePattern ]
+            if pattern |> doesPatternDefineVariables then
+                notUseless
 
-                UnitPattern ->
-                    [ replaceCaseWithExpressionAfterThePattern ]
-
-                _ ->
-                    notUseless
+            else
+                [ replaceCaseWithExpressionAfterThePattern ]
 
         noNameClashIn scope =
             allBindingsInPattern singleCasePatternNode

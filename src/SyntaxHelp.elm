@@ -1,5 +1,6 @@
 module SyntaxHelp exposing
     ( allBindingsInPattern
+    , doesPatternDefineVariables
     , mapSubexpressions
     , parensAroundNamedPattern
     , prettyExpressionReplacing
@@ -34,7 +35,8 @@ subexpressions e =
                         LetDestructuring _ expr ->
                             expr
             in
-            letBlock.expression :: List.map subExprs letBlock.declarations
+            letBlock.expression
+                :: List.map subExprs letBlock.declarations
 
         ListExpr exprs ->
             exprs
@@ -314,6 +316,23 @@ usesIn expression matchName =
                         usesIn expr matchName
                     )
                 |> List.sum
+
+
+doesPatternDefineVariables : Pattern -> Bool
+doesPatternDefineVariables pattern =
+    case pattern of
+        AllPattern ->
+            False
+
+        UnitPattern ->
+            False
+
+        NamedPattern _ subpatterns ->
+            subpatterns
+                |> List.any (doesPatternDefineVariables << Node.value)
+
+        _ ->
+            True
 
 
 {-| `case of` patterns that look like
