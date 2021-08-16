@@ -1,6 +1,5 @@
 module SyntaxHelp exposing
-    ( VarPatternKind(..)
-    , allVarsInPattern
+    ( allBindingsInPattern
     , mapSubexpressions
     , parensAroundNamedPattern
     , prettyExpressionReplacing
@@ -224,93 +223,54 @@ mapSubexpressions f e =
             e
 
 
-{-| There are places where only variable patterns can be, not any pattern:
-
-  - `VarAfterAs`: `(... as here)`
-
-  - `FieldPattern`: `{ here }`
-
-  - `AnnotatedLetVar`:
-
-        let
-            here : ...
-            here = ...
-        in
-
-Here, it can be any pattern:
-
-  - `SingleVarPattern`: `( here, _ )` or `Just here` or ...
-
+{-| Recursively find all bindings in a pattern and save whether or not
+destructuring could occur at the pattern.
 -}
-type VarPatternKind
-    = VarAfterAs
-    | FieldPattern
-    | AnnotatedLetVar
-    | SingleVarPattern
-
-
-{-| Recursively find all variable patterns in a pattern. Also save whether the variable is from after `as`.
-
-    somePattern =
-        TuplePattern
-            [ UnitPattern |> Node ...
-            , VarPattern "iAmHere" |> Node ...
-            ]
-
-    pattern
-        |> Node ...
-        |> collectVarsFromPattern
-    --> [ { name = "iAmHere", pattern = pattern } ]
-
--}
-allVarsInPattern :
-    Node Pattern
-    ->
-        List
-            { name : String
-            , nameRange : Range
-            , kind : VarPatternKind
-            }
-allVarsInPattern pattern =
+allBindingsInPattern : Node Pattern -> List ( String, { nameRange : Range, canDestructureAt : Bool } )
+allBindingsInPattern pattern =
     let
+        go : List (Node Pattern) -> List ( String, { nameRange : Range, canDestructureAt : Bool } )
         go =
             List.concatMap
-                allVarsInPattern
+                allBindingsInPattern
 
-        ofKind kind varPattern =
-            { name = Node.value varPattern
-            , nameRange = Node.range varPattern
-            , kind = kind
-            }
+        makeBinding : Bool -> Node String -> ( String, { nameRange : Range, canDestructureAt : Bool } )
+        makeBinding canDestructureAt name =
+            ( Node.value name
+            , { nameRange = Node.range name
+              , canDestructureAt = canDestructureAt
+              }
+            )
     in
     case Node.value pattern of
-        ListPattern elementPatterns ->
-            go elementPatterns
+        ListPattern ps ->
+            go ps
 
-        TuplePattern subPatterns ->
-            go subPatterns
+        TuplePattern ps ->
+            go ps
 
-        RecordPattern fieldPatterns ->
-            List.map (ofKind FieldPattern) fieldPatterns
+        RecordPattern ps ->
+            List.map (makeBinding False) ps
 
-        NamedPattern _ subPatterns ->
-            go subPatterns
+        NamedPattern _ ps ->
+            go ps
 
-        UnConsPattern headPattern tailPattern ->
-            go [ headPattern, tailPattern ]
+        UnConsPattern p ps ->
+            go [ p, ps ]
 
         VarPattern name ->
-            [ { name = name
-              , nameRange = Node.range pattern
-              , kind = SingleVarPattern
-              }
+            [ ( name
+              , { nameRange = Node.range pattern
+                , canDestructureAt = True
+                }
+              )
             ]
 
-        AsPattern pattern_ afterAs ->
-            ofKind VarAfterAs afterAs :: go [ pattern_ ]
+        AsPattern p name ->
+            makeBinding False name :: go [ p ]
 
-        ParenthesizedPattern innerPattern ->
-            go [ innerPattern ]
+        ParenthesizedPattern p ->
+            go [ p ]
 
         AllPattern ->
             []

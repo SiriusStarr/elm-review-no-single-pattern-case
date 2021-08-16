@@ -42,6 +42,7 @@ module NoSinglePatternCase exposing
 
 -}
 
+import Dict exposing (Dict)
 import Elm.CodeGen exposing (asPattern, letDestructuring, letExpr)
 import Elm.Syntax.Declaration exposing (Declaration(..))
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
@@ -52,8 +53,7 @@ import Review.Fix as Fix
 import Review.Rule as Rule exposing (Error, Rule)
 import SyntaxHelp
     exposing
-        ( VarPatternKind(..)
-        , allVarsInPattern
+        ( allBindingsInPattern
         , mapSubexpressions
         , parensAroundNamedPattern
         , prettyExpressionReplacing
@@ -781,6 +781,8 @@ alwaysFixInLet =
 --
 
 
+{-| Check a `Declaration` for single-pattern cases.
+-}
 checkDeclaration : Config separateLetUsed -> Declaration -> List (Error {})
 checkDeclaration config declaration =
     case declaration of
@@ -791,61 +793,55 @@ checkDeclaration config declaration =
             in
             expression
                 |> checkExpression config
-                    { vars =
+                    { bindings =
                         arguments
-                            |> List.concatMap allVarsInPattern
-                            |> List.map
-                                (inScope (expression |> Node.value))
-                    , mostInnerLetBlock = Nothing
+                            |> List.concatMap allBindingsInPattern
+                            |> List.map (Tuple.mapSecond (addScope (Node.value expression)))
+                            |> Dict.fromList
+                    , closestLetBlock = Nothing
                     }
 
         _ ->
             []
 
 
-inScope :
-    scope
-    -> { name : name, nameRange : Range, kind : kind }
-    -> { name : name, nameRange : Range, kind : kind, scope : scope }
-inScope scope { name, nameRange, kind } =
-    { name = name
-    , nameRange = nameRange
-    , kind = kind
+{-| Add the scope a binding is defined for.
+-}
+addScope : Expression -> { nameRange : Range, canDestructureAt : Bool } -> { nameRange : Range, canDestructureAt : Bool, scope : Expression }
+addScope scope { nameRange, canDestructureAt } =
+    { nameRange = nameRange
+    , canDestructureAt = canDestructureAt
     , scope = scope
     }
 
 
-checkExpression :
-    Config separateLetUsed
-    ->
-        { vars :
-            List
-                { name : String
-                , nameRange : Range
-                , kind : VarPatternKind
-                , scope : Expression
-                }
-        , mostInnerLetBlock :
-            Maybe
-                { declarations : List LetDeclaration
-                , expression : Node Expression
-                , blockRange : Range
-                }
-        }
-    -> Node Expression
-    -> List (Error {})
-checkExpression config { vars, mostInnerLetBlock } expressionNode =
+type alias LocalContext =
+    { bindings : Dict String Binding
+    , closestLetBlock :
+        Maybe
+            { declarations : List LetDeclaration
+            , expression : Node Expression
+            , blockRange : Range
+            }
+    }
+
+
+{-| Given a context, check an `Expression` for single-pattern cases.
+-}
+checkExpression : Config separateLetUsed -> LocalContext -> Node Expression -> List (Error {})
+checkExpression config ({ bindings, closestLetBlock } as context) expressionNode =
     let
-        checkExpressionHereWith { extraPatterns, newMostInnerLetBlock } =
+        checkExpressionHereWith { extraPatterns, newClosestLetBlock } =
             checkExpression config
-                { vars =
-                    vars
-                        ++ (extraPatterns
-                                |> List.map
-                                    (inScope (Node.value expressionNode))
-                           )
-                , mostInnerLetBlock =
-                    case newMostInnerLetBlock of
+                { bindings =
+                    Dict.union bindings
+                        (extraPatterns
+                            |> List.map
+                                (Tuple.mapSecond (addScope (Node.value expressionNode)))
+                            |> Dict.fromList
+                        )
+                , closestLetBlock =
+                    case newClosestLetBlock of
                         Just { expression, declarations } ->
                             { blockRange = Node.range expressionNode
                             , expression = expression
@@ -854,13 +850,13 @@ checkExpression config { vars, mostInnerLetBlock } expressionNode =
                                 |> Just
 
                         Nothing ->
-                            mostInnerLetBlock
+                            closestLetBlock
                 }
 
         checkExpressionHere extraPatterns =
             checkExpressionHereWith
                 { extraPatterns = extraPatterns
-                , newMostInnerLetBlock = Nothing
+                , newClosestLetBlock = Nothing
                 }
     in
     case Node.value expressionNode of
@@ -868,13 +864,12 @@ checkExpression config { vars, mostInnerLetBlock } expressionNode =
             case caseBlock.cases of
                 [ ( singleCasePattern, Node _ singleCaseExpression ) ] ->
                     [ singlePatternCaseError config
-                        { patternVars = vars
+                        { context = context
                         , expressionInCaseOf =
                             caseBlock.expression |> Node.value
                         , singleCasePattern = singleCasePattern
                         , singleCaseExpression = singleCaseExpression
                         , caseRange = Node.range expressionNode
-                        , mostInnerLetBlock = mostInnerLetBlock
                         }
                     ]
 
@@ -890,23 +885,18 @@ checkExpression config { vars, mostInnerLetBlock } expressionNode =
                 newVarsInLetDeclaration (Node _ letDeclaration) =
                     case letDeclaration of
                         LetDestructuring pattern _ ->
-                            pattern |> allVarsInPattern
+                            allBindingsInPattern pattern
 
                         LetFunction fun ->
                             let
                                 declaration =
                                     fun.declaration |> Node.value
                             in
-                            { name = declaration.name |> Node.value
-                            , nameRange = declaration.name |> Node.range
-                            , kind =
-                                case fun.signature of
-                                    Just _ ->
-                                        AnnotatedLetVar
-
-                                    Nothing ->
-                                        SingleVarPattern
-                            }
+                            ( declaration.name |> Node.value
+                            , { nameRange = declaration.name |> Node.range
+                              , canDestructureAt = fun.signature == Nothing
+                              }
+                            )
                                 |> List.singleton
 
                 newVarsInLetBlock =
@@ -920,7 +910,7 @@ checkExpression config { vars, mostInnerLetBlock } expressionNode =
                 checkExpressionInThisLetBlock newPatterns =
                     checkExpressionHereWith
                         { extraPatterns = newVarsInLetBlock ++ newPatterns
-                        , newMostInnerLetBlock = Just letBlock
+                        , newClosestLetBlock = Just letBlock
                         }
 
                 checkLetDeclaration (Node _ letDeclaration) =
@@ -933,7 +923,7 @@ checkExpression config { vars, mostInnerLetBlock } expressionNode =
                             declaration.expression
                                 |> checkExpressionInThisLetBlock
                                     (declaration.arguments
-                                        |> List.concatMap allVarsInPattern
+                                        |> List.concatMap allBindingsInPattern
                                     )
 
                         LetDestructuring _ expr ->
@@ -948,30 +938,25 @@ checkExpression config { vars, mostInnerLetBlock } expressionNode =
                 |> List.concatMap (checkExpressionHere [])
 
 
+type alias Binding =
+    { nameRange : Range
+    , canDestructureAt : Bool
+    , scope : Expression
+    }
+
+
+type alias SinglePatternCaseInfo =
+    { context : LocalContext
+    , expressionInCaseOf : Expression
+    , singleCasePattern : Node Pattern
+    , singleCaseExpression : Expression
+    , caseRange : Range
+    }
+
+
 {-| An error for when a case expression only contains one case pattern. See [`Config`](NoSinglePatternCase#Config) for how fixes will be generated.
 -}
-singlePatternCaseError :
-    Config separateLetUsed
-    ->
-        { patternVars :
-            List
-                { name : String
-                , nameRange : Range
-                , kind : VarPatternKind
-                , scope : Expression
-                }
-        , expressionInCaseOf : Expression
-        , singleCasePattern : Node Pattern
-        , singleCaseExpression : Expression
-        , caseRange : Range
-        , mostInnerLetBlock :
-            Maybe
-                { declarations : List LetDeclaration
-                , expression : Node Expression
-                , blockRange : Range
-                }
-        }
-    -> Error {}
+singlePatternCaseError : Config separateLetUsed -> SinglePatternCaseInfo -> Error {}
 singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
     let
         errorInfo =
@@ -979,14 +964,14 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
             , details = [ "Single pattern case blocks typically are either unnecessary or overly verbose.  There's usually a more concise way to destructure, e.g. in a function argument, so consider refactoring." ]
             }
 
-        { patternVars, expressionInCaseOf, singleCaseExpression, caseRange, mostInnerLetBlock } =
+        { context, expressionInCaseOf, singleCaseExpression, caseRange } =
             information
 
         singleCasePatternNode =
             information.singleCasePattern
 
         singleCasePattern =
-            singleCasePatternNode |> Node.value
+            Node.value singleCasePatternNode
 
         fix =
             case fixKind of
@@ -996,8 +981,8 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                             noExistingLets
                                 |> onlyCreatingSeparateLetLeftFixOr
                                     (\(DestructureTheArgument { argumentAlsoUsedElsewhere }) ->
-                                        case isDestructurable expressionInCaseOf of
-                                            Destructurable varInCaseOf ->
+                                        case getDestructurablePattern expressionInCaseOf of
+                                            Just varInCaseOf ->
                                                 replaceVarPatternFixIfUsedOnce varInCaseOf
                                                     { usedOften =
                                                         argumentAlsoUsedElsewhere
@@ -1007,14 +992,14 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                                                                 )
                                                     }
 
-                                            NotDestructurable ->
+                                            Nothing ->
                                                 onlySeparateLetFixLeftFix ()
                                     )
                         }
 
                 FixByDestructuringTheArgument { argumentAlsoUsedElsewhere, notDestructurable } ->
-                    case isDestructurable expressionInCaseOf of
-                        Destructurable varInCaseOf ->
+                    case getDestructurablePattern expressionInCaseOf of
+                        Just varInCaseOf ->
                             replaceVarPatternFixIfUsedOnce varInCaseOf
                                 { usedOften =
                                     case argumentAlsoUsedElsewhere of
@@ -1032,7 +1017,7 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                                                 }
                                 }
 
-                        NotDestructurable ->
+                        Nothing ->
                             notDestructurable
                                 |> onlyCreatingSeparateLetLeftFixOr
                                     (\DestructureInExistingLets ->
@@ -1053,36 +1038,28 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                 _ ->
                     usedOften
 
-        isDestructurable expression =
+        getDestructurablePattern expression =
             case expression of
                 FunctionOrValue [] varName ->
-                    case
-                        patternVars
-                            |> List.filter
-                                (.name >> (==) varName)
-                    of
-                        varPatternInCaseOf :: _ ->
-                            case varPatternInCaseOf.kind of
-                                SingleVarPattern ->
-                                    Destructurable varPatternInCaseOf
+                    Dict.get varName context.bindings
+                        |> Maybe.andThen
+                            (\{ nameRange, canDestructureAt, scope } ->
+                                if canDestructureAt then
+                                    Just
+                                        { name = varName
+                                        , nameRange = nameRange
+                                        , scope = scope
+                                        }
 
-                                VarAfterAs ->
-                                    NotDestructurable
-
-                                FieldPattern ->
-                                    NotDestructurable
-
-                                AnnotatedLetVar ->
-                                    NotDestructurable
-
-                        [] ->
-                            NotDestructurable
+                                else
+                                    Nothing
+                            )
 
                 _ ->
-                    NotDestructurable
+                    Nothing
 
         fixInExistingLets { noExistingLets } =
-            case mostInnerLetBlock of
+            case context.closestLetBlock of
                 Just existingLetBlock ->
                     fixInLetBlock existingLetBlock
 
@@ -1123,9 +1100,9 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                     notUseless
 
         noNameClashIn scope =
-            allVarsInPattern singleCasePatternNode
+            allBindingsInPattern singleCasePatternNode
                 |> List.all
-                    (.name >> usesIn scope >> (==) 1)
+                    (Tuple.first >> usesIn scope >> (==) 1)
 
         onlySeparateLetFixLeftFixIfNameClashIn scope { noClash } =
             if noNameClashIn scope then
@@ -1218,13 +1195,3 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                     }
     in
     Rule.errorWithFix errorInfo caseRange fix
-
-
-type IsDestructurable
-    = Destructurable
-        { name : String
-        , nameRange : Range
-        , kind : VarPatternKind
-        , scope : Expression
-        }
-    | NotDestructurable
