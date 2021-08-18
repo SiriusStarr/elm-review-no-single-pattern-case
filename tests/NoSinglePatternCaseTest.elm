@@ -538,6 +538,28 @@ unpack o =
     i
 """
                         ]
+        , test "impossible due to reliance on scope from closest let" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo =
+            bar
+    in
+    (\\a ->
+    case a of
+        Opaque i -> i
+        ) o
+"""
+                    |> Review.Test.run (rule alwaysFixInLet)
+                    |> Review.Test.expectErrors
+                        [ error """case a of
+        Opaque i -> i"""
+                        ]
         , describe "no existing lets → destructureTheArgument"
             [ test "possible" <|
                 \() ->
