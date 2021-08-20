@@ -151,10 +151,23 @@ elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example --ru
 -}
 rule : Config fixBy -> Rule
 rule config =
-    Rule.newModuleRuleSchema "NoSinglePatternCase" ()
-        |> Rule.withSimpleDeclarationVisitor
-            (Node.value >> checkDeclaration config)
+    Rule.newModuleRuleSchemaUsingContextCreator "NoSinglePatternCase" initialContext
+        |> Rule.withDeclarationEnterVisitor
+            (checkDeclaration config)
         |> Rule.fromModuleRuleSchema
+
+
+{-| Module context for the rule.
+-}
+type alias ModuleContext =
+    { extractSourceCode : Range -> String }
+
+
+initialContext : Rule.ContextCreator () ModuleContext
+initialContext =
+    Rule.initContextCreator
+        (\extractSourceCode () -> { extractSourceCode = extractSourceCode })
+        |> Rule.withSourceCodeExtractor
 
 
 {-| Configure the rule, determining how automatic fixes are generated.
@@ -682,9 +695,9 @@ type alias Either a b =
 
 {-| Check a TLD for single-pattern cases.
 -}
-checkDeclaration : Config fixBy -> Declaration -> List (Error {})
-checkDeclaration config d =
-    case d of
+checkDeclaration : Config fixBy -> Node Declaration -> ModuleContext -> ( List (Error {}), ModuleContext )
+checkDeclaration config d context =
+    ( case Node.value d of
         FunctionDeclaration { declaration } ->
             let
                 { expression, arguments } =
@@ -696,11 +709,14 @@ checkDeclaration config d =
                         |> Dict.fromList
                 , closestLetBlock = Nothing
                 , newBindingsSinceLastLet = Set.empty
+                , extractSourceCode = context.extractSourceCode
                 }
                 expression
 
         _ ->
             []
+    , context
+    )
 
 
 type alias LocalContext =
@@ -711,6 +727,7 @@ type alias LocalContext =
             , letBlock : LetBlock
             }
     , newBindingsSinceLastLet : Set String
+    , extractSourceCode : Range -> String
     }
 
 
@@ -751,7 +768,7 @@ checkExpression config ({ bindings } as context) expressionNode =
     case Node.value expressionNode of
         CaseExpression caseBlock ->
             case caseBlock.cases of
-                [ ( singleCasePattern, Node _ singleCaseExpression ) ] ->
+                [ ( singleCasePattern, singleCaseExpression ) ] ->
                     [ singlePatternCaseError config
                         { context = context
                         , expressionInCaseOf =
@@ -830,7 +847,7 @@ type alias SinglePatternCaseInfo =
     { context : LocalContext
     , expressionInCaseOf : Expression
     , singleCasePattern : Node Pattern
-    , singleCaseExpression : Expression
+    , singleCaseExpression : Node Expression
     , caseRange : Range
     }
 
@@ -844,9 +861,9 @@ singlePatternCaseError config info =
      -- Just use unit as "scope" here since all we care about is if any bindings are made
      if
         allBindingsInPattern UnitExpr info.singleCasePattern
-            |> List.all ((==) 0 << countUsesIn info.singleCaseExpression << Tuple.first)
+            |> List.all ((==) 0 << countUsesIn (Node.value info.singleCaseExpression) << Tuple.first)
      then
-        [ replaceCaseBlockWithExpression info.caseRange info.singleCaseExpression ]
+        [ replaceCaseBlockWithExpression info ]
 
      else
         makeFix config info
@@ -863,7 +880,7 @@ singlePatternCaseError config info =
 the config or fail.
 -}
 makeFix : Config fixBy -> SinglePatternCaseInfo -> Maybe (List Fix)
-makeFix (Config { fixBy }) { context, expressionInCaseOf, singleCaseExpression, caseRange, singleCasePattern } =
+makeFix (Config { fixBy }) ({ context, expressionInCaseOf, singleCaseExpression, caseRange, singleCasePattern } as info) =
     let
         destructureInLet : (Either a b -> Maybe (List Fix)) -> Either (Either a b) Fail -> Maybe (List Fix)
         destructureInLet fallback ifNoLetBlock =
@@ -893,7 +910,7 @@ makeFix (Config { fixBy }) { context, expressionInCaseOf, singleCaseExpression, 
 
         orUseAsPattern : ( String, Binding ) -> UseAsPattern -> Maybe (List Fix)
         orUseAsPattern ( name, binding ) UseAsPattern =
-            moveCasePatternToBinding caseRange binding (Just name) ( singleCasePattern, singleCaseExpression )
+            moveCasePatternToBinding info binding (Just name)
                 |> Just
 
         destructureInArg : (( String, Binding ) -> asFallback -> Maybe (List Fix)) -> (destructureFallback -> Maybe (List Fix)) -> Either (Either asFallback UseAsPattern) Fail -> Either (Either destructureFallback Fail) Fail -> Maybe (List Fix)
@@ -904,7 +921,7 @@ makeFix (Config { fixBy }) { context, expressionInCaseOf, singleCaseExpression, 
                         either (either (asFallback ( name, binding )) (orUseAsPattern ( name, binding ))) orFail ifAsPatternNeeded
 
                     else
-                        moveCasePatternToBinding caseRange binding Nothing ( singleCasePattern, singleCaseExpression )
+                        moveCasePatternToBinding info binding Nothing
                             |> Just
 
                 Nothing ->
@@ -923,19 +940,19 @@ name for an `as` pattern, and a single case pattern and expression, generate
 fixes destructuring in the binding. This function does not check if this is
 possible, and should only be called after `getValidPatternBinding`.
 -}
-moveCasePatternToBinding : Range -> Binding -> Maybe String -> ( Node Pattern, Expression ) -> List Fix
-moveCasePatternToBinding caseRange { patternNodeRange } asName ( replacePattern, replaceExpression ) =
+moveCasePatternToBinding : SinglePatternCaseInfo -> Binding -> Maybe String -> List Fix
+moveCasePatternToBinding ({ singleCasePattern } as info) { patternNodeRange } asName =
     (case asName of
         Just n ->
-            asPattern (Node.value replacePattern) n
+            asPattern (Node.value singleCasePattern) n
 
         Nothing ->
-            Node.value replacePattern
+            Node.value singleCasePattern
     )
         |> addParensToNamedPattern
         |> prettyPrintPattern 120
         |> Fix.replaceRangeBy patternNodeRange
-        |> (\f -> [ f, replaceCaseBlockWithExpression caseRange replaceExpression ])
+        |> (\f -> [ f, replaceCaseBlockWithExpression info ])
 
 
 {-| Given context, an expression in a `case...of`, and a single case pattern and
@@ -943,14 +960,14 @@ single case expression, return the binding that the pattern could be
 destructured at, if one exists, and whether or not an `as` pattern is required
 to do so. This function also checks for possible name clashes.
 -}
-getValidPatternBinding : LocalContext -> Expression -> ( Node Pattern, Expression ) -> Maybe { requiresAsPattern : Bool, name : String, binding : Binding }
+getValidPatternBinding : LocalContext -> Expression -> ( Node Pattern, Node Expression ) -> Maybe { requiresAsPattern : Bool, name : String, binding : Binding }
 getValidPatternBinding context caseExpr ( replacePattern, replaceScope ) =
     getDestructurableBinding context caseExpr
         |> Maybe.andThen
             (\( name, { scope } as b ) ->
                 if
-                    allBindingsInPattern replaceScope replacePattern
-                        |> List.any (\( n, _ ) -> nameUsedOutsideExpr n replaceScope scope)
+                    allBindingsInPattern (Node.value replaceScope) replacePattern
+                        |> List.any (\( n, _ ) -> nameUsedOutsideExpr n (Node.value replaceScope) scope)
                 then
                     -- Cannot move the pattern if it would cause name clash
                     Nothing
@@ -970,13 +987,13 @@ destructuring into the `let` block. This does **not** check that the `let` block
 is viable to be moved to and should only be used with a `let` block obtained
 from `getValidLetBlock`.
 -}
-moveCasePatternToLetBlock : ( Expression, Range ) -> ( Node Pattern, Expression ) -> ( LetBlock, Range ) -> Fix
+moveCasePatternToLetBlock : ( Expression, Range ) -> ( Node Pattern, Node Expression ) -> ( LetBlock, Range ) -> Fix
 moveCasePatternToLetBlock ( caseExpr, caseRange ) ( replacePattern, replaceExpression ) ( { declarations, expression }, letRange ) =
     let
         go : Node Expression -> Expression
         go e =
             if Node.range e == caseRange then
-                replaceExpression
+                Node.value replaceExpression
 
             else
                 mapSubexpressions (go >> Node emptyRange) <| Node.value e
@@ -1009,7 +1026,7 @@ moveCasePatternToLetBlock ( caseExpr, caseRange ) ( replacePattern, replaceExpre
 {-| Given a case expression and a single case pattern and expression, convert
 the case into a `let` block destructured in.
 -}
-fixInNewLet : ( Expression, Range ) -> ( Node Pattern, Expression ) -> List Fix
+fixInNewLet : ( Expression, Range ) -> ( Node Pattern, Node Expression ) -> List Fix
 fixInNewLet ( expressionInCaseOf, caseRange ) ( singleCasePattern, singleCaseExpression ) =
     [ Fix.replaceRangeBy caseRange
         (letExpr
@@ -1017,7 +1034,7 @@ fixInNewLet ( expressionInCaseOf, caseRange ) ( singleCasePattern, singleCaseExp
                 (addParensToNamedPattern <| Node.value singleCasePattern)
                 expressionInCaseOf
             ]
-            singleCaseExpression
+            (Node.value singleCaseExpression)
             |> prettyExpressionReplacing caseRange
         )
     ]
@@ -1043,7 +1060,7 @@ pattern and expression, get the closest `let` block to destructure in, if one
 exists. This requires all names in expression to be in scope in the `let` and
 checks for name clashes in the pattern to be moved.
 -}
-getValidLetBlock : LocalContext -> Expression -> ( Node Pattern, Expression ) -> Maybe ( LetBlock, Range )
+getValidLetBlock : LocalContext -> Expression -> ( Node Pattern, Node Expression ) -> Maybe ( LetBlock, Range )
 getValidLetBlock { newBindingsSinceLastLet, closestLetBlock } caseExpr ( singleCasePattern, singleCaseExpr ) =
     if
         allBindingsUsedInExpression caseExpr
@@ -1055,8 +1072,8 @@ getValidLetBlock { newBindingsSinceLastLet, closestLetBlock } caseExpr ( singleC
             |> Maybe.andThen
                 (\{ expression, letBlock } ->
                     if
-                        allBindingsInPattern singleCaseExpr singleCasePattern
-                            |> List.any (\( n, _ ) -> nameUsedOutsideExpr n singleCaseExpr <| Node.value expression)
+                        allBindingsInPattern (Node.value singleCaseExpr) singleCasePattern
+                            |> List.any (\( n, _ ) -> nameUsedOutsideExpr n (Node.value singleCaseExpr) <| Node.value expression)
                     then
                         -- Cannot move due to name clash
                         Nothing
@@ -1084,7 +1101,8 @@ would become
         2
 
 -}
-replaceCaseBlockWithExpression : Range -> Expression -> Fix
-replaceCaseBlockWithExpression range expression =
-    prettyExpressionReplacing range expression
-        |> Fix.replaceRangeBy range
+replaceCaseBlockWithExpression : SinglePatternCaseInfo -> Fix
+replaceCaseBlockWithExpression { context, singleCaseExpression, caseRange } =
+    Node.range singleCaseExpression
+        |> context.extractSourceCode
+        |> Fix.replaceRangeBy caseRange
