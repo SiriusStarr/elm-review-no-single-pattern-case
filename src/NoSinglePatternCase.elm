@@ -1,9 +1,8 @@
 module NoSinglePatternCase exposing
     ( rule
     , Config, fixInArgument, fixInLet
-    , ifAsPatternRequired, ifArgumentNotDestructurable, ifNoLetExists
-    , fail, createNewLet, useAsPattern, fixInArgumentInstead, andIfAsPatternRequired, andIfArgumentNotDestructurable, fixInLetInstead, andIfNoLetExists
-    , resolveNameClashByCreatingLet
+    , ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
+    , fail, createNewLet, useAsPattern, fixInArgumentInstead, andIfAsPatternRequired, andIfCannotDestructureAtArgument, fixInLetInstead, andIfNoLetExists
     )
 
 {-|
@@ -21,23 +20,18 @@ module NoSinglePatternCase exposing
 
 ## Customizing Config Behavior
 
-@docs ifAsPatternRequired, ifArgumentNotDestructurable, ifNoLetExists
+@docs ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
 
 
 ## Config Behavior Options
 
 These functions are simply used by
 [`ifAsPatternRequired`](#ifAsPatternRequired),
-[`ifArgumentNotDestructurable`](#ifArgumentNotDestructurable), and
+[`ifCannotDestructureAtArgument`](#ifCannotDestructureAtArgument), and
 [`ifNoLetExists`](#ifNoLetExists) to customize behavior of the default configs.
 Look at the examples in those to understand how to use them.
 
-@docs fail, createNewLet, useAsPattern, fixInArgumentInstead, andIfAsPatternRequired, andIfArgumentNotDestructurable, fixInLetInstead, andIfNoLetExists
-
-
-## Resolving Name Clashes
-
-@docs resolveNameClashByCreatingLet
+@docs fail, createNewLet, useAsPattern, fixInArgumentInstead, andIfAsPatternRequired, andIfCannotDestructureAtArgument, fixInLetInstead, andIfNoLetExists
 
 -}
 
@@ -155,17 +149,9 @@ The default `Config`s [`fixInArgument`](#fixInArgument) and
 [`fixInLet`](#fixInLet) should be used as reasonable defaults, with more
 customization detailed in those sections.
 
-All methods of fixing can generate name clashes, as the scope of the name will
-necessarily be larger. By default, such name clashes will not be automatically
-fixed (though `elm-review` errors will still be generated so they can be
-manually resolved). They can, however, be automatically fixed by creating a
-separate `let` block just to destructure the pattern in. Use
-[`resolveNameClashByCreatingLet`](#resolveNameClashByCreatingLet) if this
-behavior is desired.
-
 -}
 type Config fixBy
-    = Config { fixBy : FixBy, createLetForNameClash : Bool }
+    = Config { fixBy : FixBy }
 
 
 {-| Phantom type for `Config fixBy`.
@@ -222,8 +208,8 @@ will be fixed to:
                 i
 
 Use [`ifAsPatternRequired`](#ifAsPatternRequired) and
-[`ifArgumentNotDestructurable`](#ifArgumentNotDestructurable) to customize the
-behavior in either of these cases.
+[`ifCannotDestructureAtArgument`](#ifCannotDestructureAtArgument) to customize
+the behavior in either of these cases.
 
 -}
 fixInArgument : Config FixInArgument
@@ -232,9 +218,8 @@ fixInArgument =
         { fixBy =
             DestructureInArgument
                 { asPatternRequired = useAsPattern
-                , notDestructurable = fail
+                , cannotDestructureAtArgument = fail
                 }
-        , createLetForNameClash = False
         }
 
 
@@ -276,7 +261,40 @@ will be fixed to:
         i + x
 
 Use [`ifNoLetExists`](#ifNoLetExists) to customize the behavior in the case
-where no `let` block exists.
+where no `let` block exists within the scope the pattern is valid in. To
+clarify, the following counts as no `let` existing:
+
+    unpack : Opaque -> Int
+    unpack o =
+        let
+            foo =
+                bar
+        in
+        (\a ->
+            case a of
+                Opaque i ->
+                    i
+        )
+            o
+
+as the name `a` is not in scope in the extant `let` block.
+
+[`ifNoLetExists`](#ifNoLetExists) also handles the case where the closest `let`
+block would result in a name clash. To clarify, the following counts as no
+`let` existing:
+
+    unpack : Opaque -> Int
+    unpack o =
+        let
+            foo =
+                (\i -> i + 1) 0
+        in
+        case o of
+            Opaque i ->
+                i
+
+as `i` cannot be unpacked in the `let` block, as doing so would cause a name
+clash with the `i` in `foo`.
 
 -}
 fixInLet : Config FixInLet
@@ -284,7 +302,6 @@ fixInLet =
     Config
         { fixBy =
             DestructureInLet { noValidLetExists = createNewLet }
-        , createLetForNameClash = False
         }
 
 
@@ -328,19 +345,39 @@ e.g.
 
 -}
 ifAsPatternRequired : UseAsPatternOrLetsOrFail -> Config FixInArgument -> Config FixInArgument
-ifAsPatternRequired either (Config r) =
+ifAsPatternRequired e (Config r) =
     case r.fixBy of
         DestructureInArgument c ->
-            Config { r | fixBy = DestructureInArgument { c | asPatternRequired = either } }
+            Config { r | fixBy = DestructureInArgument { c | asPatternRequired = e } }
 
         DestructureInLet _ ->
             Config r
 
 
-{-| Specify what to do if the argument cannot be destructured at, e.g.
+{-| Specify what to do if the argument cannot be destructured at, either due to
+it being a record field, e.g.
 
     f { recordField } =
         case recordField of
+            Opaque i ->
+                i
+
+or a more complex `case` expression, e.g.
+
+    f a =
+        case foo <| bar a of
+            Opaque i ->
+                i
+
+or due to a name clash that would be caused by the increase in scope, e.g.
+
+    unpack : Opaque -> Int
+    unpack o =
+        let
+            foo =
+                (\i -> i + 1) 0
+        in
+        case o of
             Opaque i ->
                 i
 
@@ -349,28 +386,28 @@ Available options are [`fixInLetInstead`](#fixInLetInstead) or [`fail`](#fail)
 
     c1 =
         fixInArgument
-            |> ifArgumentNotDestructurable fail
+            |> ifCannotDestructureAtArgument fail
 
     c2 =
         fixInArgument
-            |> ifArgumentNotDestructurable
+            |> ifCannotDestructureAtArgument
                 (fixInLetInstead
                     |> andIfNoLetExists fail
                 )
 
     c3 =
         fixInArgument
-            |> ifArgumentNotDestructurable
+            |> ifCannotDestructureAtArgument
                 (fixInLetInstead
                     |> andIfNoLetExists createNewLet
                 )
 
 -}
-ifArgumentNotDestructurable : FallbackToLetsOrFail -> Config FixInArgument -> Config FixInArgument
-ifArgumentNotDestructurable either (Config r) =
+ifCannotDestructureAtArgument : FallbackToLetsOrFail -> Config FixInArgument -> Config FixInArgument
+ifCannotDestructureAtArgument e (Config r) =
     case r.fixBy of
         DestructureInArgument c ->
-            Config { r | fixBy = DestructureInArgument { c | notDestructurable = either } }
+            Config { r | fixBy = DestructureInArgument { c | cannotDestructureAtArgument = e } }
 
         DestructureInLet _ ->
             Config r
@@ -382,7 +419,7 @@ new one.
 Available options are [`fixInArgumentInstead`](#fixInArgumentInstead),
 [`createNewLet`](#createNewLet) (this is the default), or [`fail`](#fail). Note
 that [`andIfAsPatternRequired`](#andIfAsPatternRequired) and
-[`andIfArgumentNotDestructurable`](#andIfArgumentNotDestructurable) must appear
+[`andIfCannotDestructureAtArgument`](#andIfCannotDestructureAtArgument) must appear
 in that order after [`fixInArgumentInstead`](#fixInArgumentInstead).
 
     c1 =
@@ -399,13 +436,13 @@ in that order after [`fixInArgumentInstead`](#fixInArgumentInstead).
             |> ifNoLetExists
                 (fixInArgumentInstead
                     |> andIfAsPatternRequired useAsPattern
-                    |> andIfArgumentNotDestructurable fail
+                    |> andIfCannotDestructureAtArgument fail
                 )
 
 -}
 ifNoLetExists : FallbackToArgOrCreateNewLetOrFail -> Config FixInLet -> Config FixInLet
-ifNoLetExists either (Config r) =
-    Config { r | fixBy = DestructureInLet { noValidLetExists = either } }
+ifNoLetExists e (Config r) =
+    Config { r | fixBy = DestructureInLet { noValidLetExists = e } }
 
 
 {-| Fallback to destructuring in a `let` block instead of the argument.
@@ -426,7 +463,7 @@ andIfNoLetExists fallback f =
 {-| Fallback to destructuring in the argument instead of a `let` block.
 
 Note that [`andIfAsPatternRequired`](#andIfAsPatternRequired) and
-[`andIfArgumentNotDestructurable`](#andIfArgumentNotDestructurable) must appear
+[`andIfCannotDestructureAtArgument`](#andIfCannotDestructureAtArgument) must appear
 in that order, e.g.
 
     c =
@@ -434,13 +471,18 @@ in that order, e.g.
             |> ifNoLetExists
                 (fixInArgumentInstead
                     |> andIfAsPatternRequired useAsPattern
-                    |> andIfArgumentNotDestructurable fail
+                    |> andIfCannotDestructureAtArgument fail
                 )
 
 -}
 fixInArgumentInstead : CanUseAsPatternOrFailOr CreateNewLet -> CreateNewLetOr Fail -> FallbackToArgOrCreateNewLetOrFail
-fixInArgumentInstead asPatternRequired notDestructurable =
-    A <| B <| FallbackToArgument { asPatternRequired = asPatternRequired, notDestructurable = notDestructurable }
+fixInArgumentInstead asPatternRequired cannotDestructureAtArgument =
+    FallbackToArgument
+        { asPatternRequired = asPatternRequired
+        , cannotDestructureAtArgument = cannotDestructureAtArgument
+        }
+        |> B
+        |> A
 
 
 {-| Specify what to do if an `as` pattern would be necessary.
@@ -453,7 +495,7 @@ Available options are [`useAsPattern`](#useAsPattern),
             |> ifNoLetExists
                 (fixInArgumentInstead
                     |> andIfAsPatternRequired useAsPattern
-                    |> andIfArgumentNotDestructurable fail
+                    |> andIfCannotDestructureAtArgument fail
                 )
 
     c2 =
@@ -461,7 +503,7 @@ Available options are [`useAsPattern`](#useAsPattern),
             |> ifNoLetExists
                 (fixInArgumentInstead
                     |> andIfAsPatternRequired createNewLet
-                    |> andIfArgumentNotDestructurable fail
+                    |> andIfCannotDestructureAtArgument fail
                 )
 
     c3 =
@@ -469,7 +511,7 @@ Available options are [`useAsPattern`](#useAsPattern),
             |> ifNoLetExists
                 (fixInArgumentInstead
                     |> andIfAsPatternRequired fail
-                    |> andIfArgumentNotDestructurable fail
+                    |> andIfCannotDestructureAtArgument fail
                 )
 
 -}
@@ -499,7 +541,7 @@ Available options are [`createNewLet`](#createNewLet) or [`fail`](#fail)
             |> ifNoLetExists
                 (fixInArgumentInstead
                     |> andIfAsPatternRequired fail
-                    |> andIfArgumentNotDestructurable createNewLet
+                    |> andIfCannotDestructureAtArgument createNewLet
                 )
 
     c2 =
@@ -507,13 +549,13 @@ Available options are [`createNewLet`](#createNewLet) or [`fail`](#fail)
             |> ifNoLetExists
                 (fixInArgumentInstead
                     |> andIfAsPatternRequired fail
-                    |> andIfArgumentNotDestructurable fail
+                    |> andIfCannotDestructureAtArgument fail
                 )
 
 -}
-andIfArgumentNotDestructurable : CreateNewLetOr Fail -> (CreateNewLetOr Fail -> FallbackToArgOrCreateNewLetOrFail) -> FallbackToArgOrCreateNewLetOrFail
-andIfArgumentNotDestructurable notDestructurable f =
-    f notDestructurable
+andIfCannotDestructureAtArgument : CreateNewLetOr Fail -> (CreateNewLetOr Fail -> FallbackToArgOrCreateNewLetOrFail) -> FallbackToArgOrCreateNewLetOrFail
+andIfCannotDestructureAtArgument cannotDestructureAtArgument f =
+    f cannotDestructureAtArgument
 
 
 {-| Choose to create a `let` block when none exists.
@@ -530,38 +572,6 @@ fail =
     B Fail
 
 
-{-| Change the default behavior to instead resolve name clashes by creating a
-separate `let` block. For example:
-
-    f o =
-        let
-            j i =
-                i + 1
-        in
-        case o of
-            Opaque i ->
-                j i
-
-instead of generating an error with no automatic fix, will be automatically
-fixed to:
-
-    f o =
-        let
-            j i =
-                i + 1
-        in
-        let
-            (Opaque i) =
-                o
-        in
-        j i
-
--}
-resolveNameClashByCreatingLet : Config fixBy -> Config fixBy
-resolveNameClashByCreatingLet (Config r) =
-    Config { r | createLetForNameClash = True }
-
-
 {-| Specify how to automatically fix single-pattern cases.
 
   - `DestructureInLet` -- Destructure in a `let` block.
@@ -572,7 +582,7 @@ type FixBy
     = DestructureInLet { noValidLetExists : FallbackToArgOrCreateNewLetOrFail }
     | DestructureInArgument
         { asPatternRequired : UseAsPatternOrLetsOrFail
-        , notDestructurable : FallbackToLetsOrFail
+        , cannotDestructureAtArgument : FallbackToLetsOrFail
         }
 
 
@@ -631,7 +641,7 @@ block.
 type FallbackToArgument
     = FallbackToArgument
         { asPatternRequired : CanUseAsPatternOrFailOr CreateNewLet
-        , notDestructurable : CreateNewLetOr Fail
+        , cannotDestructureAtArgument : CreateNewLetOr Fail
         }
 
 
