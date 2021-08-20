@@ -2,6 +2,7 @@ module SyntaxHelp exposing
     ( Binding
     , addParensToNamedPattern
     , allBindingsInPattern
+    , allBindingsUsedInExpression
     , countUsesIn
     , mapSubexpressions
     , prettyExpressionReplacing
@@ -16,6 +17,7 @@ import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern(..))
 import Elm.Syntax.Range exposing (Range)
 import Pretty exposing (pretty)
+import Set exposing (Set)
 
 
 {-| Get all immediate child expressions of an expression.
@@ -223,6 +225,21 @@ mapSubexpressions f e =
 
         PrefixOperator _ ->
             e
+
+
+{-| Get a set of all (unqualified) bindings used in an expression.
+-}
+allBindingsUsedInExpression : Expression -> Set String
+allBindingsUsedInExpression expr =
+    case expr of
+        -- If the name is qualified, it isn't a variable
+        FunctionOrValue [] n ->
+            Set.singleton n
+
+        _ ->
+            subexpressions expr
+                -- Map and accumulate in one pass
+                |> List.foldl (\e -> Set.union (allBindingsUsedInExpression <| Node.value e)) Set.empty
 
 
 {-| Recursively find all bindings in a pattern and save whether or not
