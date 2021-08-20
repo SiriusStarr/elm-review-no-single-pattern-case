@@ -44,12 +44,14 @@ import Elm.Syntax.Pattern exposing (Pattern)
 import Elm.Syntax.Range exposing (Range, emptyRange)
 import Review.Fix as Fix
 import Review.Rule as Rule exposing (Error, Rule)
-import SyntaxHelp
+import Util
     exposing
         ( Binding
+        , Either(..)
         , addParensToNamedPattern
         , allBindingsInPattern
         , countUsesIn
+        , either
         , mapSubexpressions
         , prettyExpressionReplacing
         , prettyPrintPattern
@@ -449,7 +451,9 @@ ifNoLetExists e (Config r) =
 -}
 fixInLetInstead : a -> FallBackToLetsOr a b
 fixInLetInstead f =
-    A <| A <| FallbackToExistingLet { noValidLetExists = f }
+    FallbackToExistingLet { noValidLetExists = f }
+        |> A
+        |> A
 
 
 {-| If no `let` block exists to destructure in, choose some other behavior
@@ -584,13 +588,6 @@ type FixBy
         { asPatternRequired : UseAsPatternOrLetsOrFail
         , cannotDestructureAtArgument : FallbackToLetsOrFail
         }
-
-
-{-| Allow a choice between fix a or fix b.
--}
-type Either a b
-    = A a
-    | B b
 
 
 type alias UseAsPatternOrLetsOrFail =

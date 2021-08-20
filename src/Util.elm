@@ -1,9 +1,11 @@
 module Util exposing
     ( Binding
+    , Either(..)
     , addParensToNamedPattern
     , allBindingsInPattern
     , allBindingsUsedInExpression
     , countUsesIn
+    , either
     , mapSubexpressions
     , prettyExpressionReplacing
     , prettyPrintPattern
@@ -430,3 +432,22 @@ reindent amount =
             )
         >> String.join "\n"
         >> String.trimLeft
+
+
+{-| Allow a choice between two options.
+-}
+type Either a b
+    = A a
+    | B b
+
+
+{-| Case analysis for the `Either` type.
+-}
+either : (a -> c) -> (b -> c) -> Either a b -> c
+either fA fB aOrB =
+    case aOrB of
+        A a ->
+            fA a
+
+        B b ->
+            fB b
