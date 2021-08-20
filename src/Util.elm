@@ -1,4 +1,4 @@
-module SyntaxHelp exposing
+module Util exposing
     ( Binding
     , addParensToNamedPattern
     , allBindingsInPattern
