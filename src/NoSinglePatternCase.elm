@@ -61,6 +61,7 @@ import Util
         , addParensToNamedPattern
         , allBindingsInPattern
         , allBindingsUsedInExpression
+        , countUsesIn
         , either
         , mapSubexpressions
         , nameUsedOutsideExpr
@@ -841,7 +842,10 @@ singlePatternCaseError config info =
     (-- Check for useless cases.  This is also caught by `elm-review-simplify`,
      -- but we'll handle it in case they don't have that in their review config.
      -- Just use unit as "scope" here since all we care about is if any bindings are made
-     if List.isEmpty <| allBindingsInPattern UnitExpr info.singleCasePattern then
+     if
+        allBindingsInPattern UnitExpr info.singleCasePattern
+            |> List.all ((==) 0 << countUsesIn info.singleCaseExpression << Tuple.first)
+     then
         [ replaceCaseBlockWithExpression info.caseRange info.singleCaseExpression ]
 
      else

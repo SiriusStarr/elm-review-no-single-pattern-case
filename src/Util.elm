@@ -4,6 +4,7 @@ module Util exposing
     , addParensToNamedPattern
     , allBindingsInPattern
     , allBindingsUsedInExpression
+    , countUsesIn
     , either
     , mapSubexpressions
     , nameUsedOutsideExpr

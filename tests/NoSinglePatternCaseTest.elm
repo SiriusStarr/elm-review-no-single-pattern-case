@@ -48,121 +48,93 @@ isA aOrB =
 disallowed : Test
 disallowed =
     describe "does not allow"
-        [ withUselessPattern
+        [ uselessPattern
         , destructureTheArgumentTest
         , destructureInExistingLetsTest
         ]
 
 
-withUselessPattern : Test
-withUselessPattern =
-    describe "useless pattern (_ or ())"
-        [ describe "replace the argument"
-            [ describe "possible"
-                [ test "_" <|
-                    \() ->
-                        """module A exposing (..)
+uselessPattern : Test
+uselessPattern =
+    describe "useless pattern"
+        [ test "wildcard" <|
+            \() ->
+                """module A exposing (..)
 
 always2 : a -> Int
 always2 a =
     case a of
         _ -> 2
 """
-                            |> Review.Test.run (rule fixInArgument)
-                            |> Review.Test.expectErrors
-                                [ error """case a of
-        _ -> 2""" |> Review.Test.whenFixed """module A exposing (..)
-
-always2 : a -> Int
-always2 a =
-    2
-"""
-                                ]
-                , test "()" <|
-                    \() ->
-                        """module A exposing (..)
-
-pointless : () -> Bool
-pointless unit =
-    case unit of
-        () -> True
-"""
-                            |> Review.Test.run (rule fixInArgument)
-                            |> Review.Test.expectErrors
-                                [ error """case unit of
-        () -> True"""
-                                    |> Review.Test.whenFixed """module A exposing (..)
-
-pointless : () -> Bool
-pointless unit =
-    True
-"""
-                                ]
-                ]
-            ]
-        , test "not possible" <|
-            \() ->
-                """module A exposing (..)
-
-add2 : number -> number
-add2 n =
-    case n of
-        _ -> n + 2
-"""
                     |> Review.Test.run (rule fixInArgument)
-                    |> Review.Test.expectErrors
-                        [ error """case n of
-        _ -> n + 2""" |> Review.Test.whenFixed """module A exposing (..)
-
-add2 : number -> number
-add2 n =
-    n + 2
-"""
-                        ]
-        , test "not possible due to non-destructurable pattern" <|
-            \() ->
-                """module A exposing (..)
-
-add2 : {n : number} -> number
-add2 {n} =
-    case n of
-        _ -> 2
-"""
-                    |> Review.Test.run (rule fixInArgument)
-                    |> Review.Test.expectErrors
-                        [ error """case n of
-        _ -> 2""" |> Review.Test.whenFixed """module A exposing (..)
-
-add2 : {n : number} -> number
-add2 {n} =
-    2
-"""
-                        ]
-        , test "(don't) destructure in existing lets" <|
-            \() ->
-                """module A exposing (..)
-
-always2 : a -> Int
-always2 a =
-    let
-        foo =
-            bar
-    in
-    case a of
-        _ -> 2
-"""
-                    |> Review.Test.run (rule fixInLet)
                     |> Review.Test.expectErrors
                         [ error """case a of
         _ -> 2""" |> Review.Test.whenFixed """module A exposing (..)
 
 always2 : a -> Int
 always2 a =
-    let
-        foo =
-            bar
-    in
     2
+"""
+                        ]
+        , test "unit" <|
+            \() ->
+                """module A exposing (..)
+
+pointless : () -> Bool
+pointless unit =
+    case unit of
+        () -> True
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error """case unit of
+        () -> True""" |> Review.Test.whenFixed """module A exposing (..)
+
+pointless : () -> Bool
+pointless unit =
+    True
+"""
+                        ]
+        , test "complex pattern" <|
+            \() ->
+                """module A exposing (..)
+
+pointless : { n : a } -> Bool
+pointless record =
+    case record of
+        ({ n } as r) -> True
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error """case record of
+        ({ n } as r) -> True""" |> Review.Test.whenFixed """module A exposing (..)
+
+pointless : { n : a } -> Bool
+pointless record =
+    True
+"""
+                        ]
+        , test "single custom type" <|
+            \() ->
+                """module A exposing (..)
+
+type A = A Int
+
+pointless : A -> Bool
+pointless a =
+    case a of
+        A int -> True
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error """case a of
+        A int -> True""" |> Review.Test.whenFixed """module A exposing (..)
+
+type A = A Int
+
+pointless : A -> Bool
+pointless a =
+    True
 """
                         ]
         ]
