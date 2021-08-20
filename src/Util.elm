@@ -7,6 +7,7 @@ module Util exposing
     , countUsesIn
     , either
     , mapSubexpressions
+    , nameUsedOutsideExpr
     , prettyExpressionReplacing
     , prettyPrintPattern
     , subexpressions
@@ -333,6 +334,14 @@ countUsesIn expr name =
             subexpressions expr
                 -- Count and sum in one pass
                 |> List.foldl (\e -> (+) (countUsesIn (Node.value e) name)) 0
+
+
+{-| Given a name, an inner expression, and an outer expression, report if the
+name is used in the outer expression exclusive of the inner expression.
+-}
+nameUsedOutsideExpr : String -> Expression -> Expression -> Bool
+nameUsedOutsideExpr name inner outer =
+    countUsesIn outer name > countUsesIn inner name
 
 
 {-| A binding with some scope.

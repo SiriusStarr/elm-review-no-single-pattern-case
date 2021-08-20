@@ -906,122 +906,160 @@ singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
                 Fix option ->
                     inFix option
 
-        onlySeparateLetFixLeftFix () =
-            case onlySeparateLetFixLeft of
-                CreateSeparateLet ->
-                    createSeparateLetFix ()
 
-                DontCreateSeparateLet ->
-                    []
+{-| Given the full range of a `case` block, a binding to destructure at, maybe a
+name for an `as` pattern, and a single case pattern and expression, generate
+fixes destructuring in the binding. This function does not check if this is
+possible, and should only be called after `getValidPatternBinding`.
+-}
+moveCasePatternToBinding : Range -> Binding -> Maybe String -> ( Node Pattern, Expression ) -> List Fix
+moveCasePatternToBinding caseRange { patternNodeRange } asName ( replacePattern, replaceExpression ) =
+    (case asName of
+        Just n ->
+            asPattern (Node.value replacePattern) n
 
-        replaceCaseWithExpressionAfterThePattern =
-            Fix.replaceRangeBy caseRange
-                (singleCaseExpression
-                    |> prettyExpressionReplacing caseRange
-                )
+        Nothing ->
+            Node.value replacePattern
+    )
+        |> addParensToNamedPattern
+        |> prettyPrintPattern 120
+        |> Fix.replaceRangeBy patternNodeRange
+        |> (\f -> [ f, replaceCaseBlockWithExpression caseRange replaceExpression ])
 
-        replaceUselessCase { notUseless } pattern =
-            -- Just use unit as "scope" here since all we care about is if any bindings are made
-            if List.isEmpty <| allBindingsInPattern UnitExpr pattern then
-                [ replaceCaseWithExpressionAfterThePattern ]
+
+{-| Given context, an expression in a `case...of`, and a single case pattern and
+single case expression, return the binding that the pattern could be
+destructured at, if one exists, and whether or not an `as` pattern is required
+to do so. This function also checks for possible name clashes.
+-}
+getValidPatternBinding : LocalContext -> Expression -> ( Node Pattern, Expression ) -> Maybe { requiresAsPattern : Bool, name : String, binding : Binding }
+getValidPatternBinding context caseExpr ( replacePattern, replaceScope ) =
+    getDestructurableBinding context caseExpr
+        |> Maybe.andThen
+            (\( name, { scope } as b ) ->
+                if
+                    allBindingsInPattern replaceScope replacePattern
+                        |> List.any (\( n, _ ) -> nameUsedOutsideExpr n replaceScope scope)
+                then
+                    -- Cannot move the pattern if it would cause name clash
+                    Nothing
+
+                else
+                    Just
+                        { requiresAsPattern = nameUsedOutsideExpr name caseExpr scope
+                        , name = name
+                        , binding = b
+                        }
+            )
+
+
+{-| Given the expression in `case ... of` and the range of the entire `case`,
+the single case pattern, the single case expression, and a `let` block, move the
+destructuring into the `let` block. This does **not** check that the `let` block
+is viable to be moved to and should only be used with a `let` block obtained
+from `getValidLetBlock`.
+-}
+moveCasePatternToLetBlock : ( Expression, Range ) -> ( Node Pattern, Expression ) -> ( LetBlock, Range ) -> Fix
+moveCasePatternToLetBlock ( caseExpr, caseRange ) ( replacePattern, replaceExpression ) ( { declarations, expression }, letRange ) =
+    let
+        go e =
+            if Node.range e == caseRange then
+                replaceExpression
 
             else
-                notUseless
-
-        noNameClashIn scope =
-            allBindingsInPattern singleCaseExpression singleCasePattern
-                |> List.all
-                    (Tuple.first >> countUsesIn scope >> (==) 1)
-
-        onlySeparateLetFixLeftFixIfNameClashIn scope { noClash } =
-            if noNameClashIn scope then
-                noClash
-
-            else
-                onlySeparateLetFixLeftFix ()
-
-        destructureAsFix { name, patternNodeRange, scope } =
-            singleCasePattern
-                |> replaceUselessCase
-                    { notUseless =
-                        onlySeparateLetFixLeftFixIfNameClashIn scope
-                            { noClash =
-                                [ Fix.replaceRangeBy patternNodeRange
-                                    (asPattern (Node.value singleCasePattern) name
-                                        |> prettyPrintPattern 120
-                                    )
-                                , replaceCaseWithExpressionAfterThePattern
-                                ]
-                            }
-                    }
-
-        fixInLetBlock letBlock =
-            singleCasePattern
-                |> replaceUselessCase
-                    { notUseless =
-                        onlySeparateLetFixLeftFixIfNameClashIn
-                            (letExpr
-                                letBlock.declarations
-                                (letBlock.expression |> Node.value)
-                            )
-                            { noClash =
-                                fixInLets letBlock singleCasePattern
-                            }
-                    }
-
-        fixInLets letBlock pattern =
-            [ Fix.replaceRangeBy letBlock.blockRange
-                (letExpr
-                    (letBlock.declarations
-                        ++ [ letDestructuring
-                                (addParensToNamedPattern <| Node.value pattern)
-                                expressionInCaseOf
-                           ]
-                    )
-                    (let
-                        replaceTheCase expression =
-                            if Node.range expression == caseRange then
-                                singleCaseExpression
-
-                            else
-                                expression
-                                    |> Node.value
-                                    |> mapSubexpressions
-                                        (replaceTheCase >> Node emptyRange)
-                     in
-                     letBlock.expression |> replaceTheCase
-                    )
-                    |> prettyExpressionReplacing caseRange
-                )
-            ]
-
-        replaceVarPatternFix { varRange, varPatternScope } =
-            onlySeparateLetFixLeftFixIfNameClashIn varPatternScope
-                { noClash =
-                    [ Fix.replaceRangeBy varRange
-                        (singleCasePattern
-                            |> Node.value
-                            |> addParensToNamedPattern
-                            |> prettyPrintPattern 120
-                        )
-                    , replaceCaseWithExpressionAfterThePattern
-                    ]
-                }
-
-        createSeparateLetFix () =
-            singleCasePattern
-                |> replaceUselessCase
-                    { notUseless =
-                        [ Fix.replaceRangeBy caseRange
-                            (letExpr
-                                [ letDestructuring
-                                    (addParensToNamedPattern <| Node.value singleCasePattern)
-                                    expressionInCaseOf
-                                ]
-                                singleCaseExpression
-                                |> prettyExpressionReplacing caseRange
-                            )
-                        ]
-                    }
+                mapSubexpressions (go >> Node emptyRange) <| Node.value e
     in
-    Rule.errorWithFix errorInfo caseRange fix
+    go expression
+        |> letExpr
+            (List.map Node.value declarations
+                ++ [ letDestructuring
+                        (addParensToNamedPattern <| Node.value replacePattern)
+                        caseExpr
+                   ]
+            )
+        |> prettyExpressionReplacing caseRange
+        |> Fix.replaceRangeBy letRange
+
+
+{-| Given a case expression and a single case pattern and expression, convert
+the case into a `let` block destructured in.
+-}
+fixInNewLet : ( Expression, Range ) -> ( Node Pattern, Expression ) -> List Fix
+fixInNewLet ( expressionInCaseOf, caseRange ) ( singleCasePattern, singleCaseExpression ) =
+    [ Fix.replaceRangeBy caseRange
+        (letExpr
+            [ letDestructuring
+                (addParensToNamedPattern <| Node.value singleCasePattern)
+                expressionInCaseOf
+            ]
+            singleCaseExpression
+            |> prettyExpressionReplacing caseRange
+        )
+    ]
+
+
+{-| Given context, get the binding information of an expression if it consists
+solely of a name and its binding location can be destructured at.
+-}
+getDestructurableBinding : LocalContext -> Expression -> Maybe ( String, Binding )
+getDestructurableBinding { bindings } expr =
+    case expr of
+        FunctionOrValue [] name ->
+            Dict.get name bindings
+                |> MaybeX.filter .canDestructureAt
+                |> Maybe.map (Tuple.pair name)
+
+        _ ->
+            Nothing
+
+
+{-| Given context, the expression in a `case ... of`, and the single case
+pattern and expression, get the closest `let` block to destructure in, if one
+exists. This requires all names in expression to be in scope in the `let` and
+checks for name clashes in the pattern to be moved.
+-}
+getValidLetBlock : LocalContext -> Expression -> ( Node Pattern, Expression ) -> Maybe ( LetBlock, Range )
+getValidLetBlock { newBindingsSinceLastLet, closestLetBlock } caseExpr ( singleCasePattern, singleCaseExpr ) =
+    if
+        allBindingsUsedInExpression caseExpr
+            |> Set.intersect newBindingsSinceLastLet
+            |> Set.isEmpty
+    then
+        -- No bindings in expression weren't in scope at time of last `let`
+        closestLetBlock
+            |> Maybe.andThen
+                (\{ expression, letBlock } ->
+                    if
+                        allBindingsInPattern singleCaseExpr singleCasePattern
+                            |> List.any (\( n, _ ) -> nameUsedOutsideExpr n singleCaseExpr <| Node.value expression)
+                    then
+                        -- Cannot move due to name clash
+                        Nothing
+
+                    else
+                        Just ( letBlock, Node.range expression )
+                )
+
+    else
+        -- Some bindings in expression weren't in scope at time of last `let`
+        Nothing
+
+
+{-| Replace the entirety of a single-pattern case with the part after the
+pattern, e.g.
+
+    f x =
+        case x of
+            _ ->
+                2
+
+would become
+
+    f x =
+        2
+
+-}
+replaceCaseBlockWithExpression : Range -> Expression -> Fix
+replaceCaseBlockWithExpression range expression =
+    prettyExpressionReplacing range expression
+        |> Fix.replaceRangeBy range
