@@ -18,6 +18,8 @@ import NoExposingEverything
 import NoForbiddenWords
 import NoImportingEverything
 import NoMissingTypeAnnotation
+import NoMissingTypeAnnotationInLetIn
+import NoMissingTypeExpose
 import NoUnused.CustomTypeConstructorArgs
 import NoUnused.CustomTypeConstructors
 import NoUnused.Dependencies
@@ -40,6 +42,8 @@ config =
     , NoForbiddenWords.rule [ "REPLACEME" ]
     , NoImportingEverything.rule []
     , NoMissingTypeAnnotation.rule
+    , NoMissingTypeAnnotationInLetIn.rule
+    , NoMissingTypeExpose.rule
     , NoUnused.CustomTypeConstructors.rule []
     , NoUnused.CustomTypeConstructorArgs.rule
     , NoUnused.Dependencies.rule

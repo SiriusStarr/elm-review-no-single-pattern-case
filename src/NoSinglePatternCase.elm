@@ -3,6 +3,7 @@ module NoSinglePatternCase exposing
     , Config, fixInArgument, fixInLet
     , ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
     , fail, createNewLet, useAsPattern, fixInArgumentInstead, andIfAsPatternRequired, andIfCannotDestructureAtArgument, fixInLetInstead, andIfNoLetExists
+    , FixInArgument, FixInLet, UseArgInstead, UseLetInstead, CreateNewLet, Fail, UseAsPattern, UseAsPatternOrFailOr, CreateNewLetOr, UseArgOrCreateNewLetOrFail, UseLetOr, UseLetOrFail, UseAsPatternOrLetsOrFail, Either
     )
 
 {-|
@@ -33,6 +34,14 @@ Look at the examples in those to understand how to use them.
 
 @docs fail, createNewLet, useAsPattern, fixInArgumentInstead, andIfAsPatternRequired, andIfCannotDestructureAtArgument, fixInLetInstead, andIfNoLetExists
 
+
+## Types
+
+You shouldn't need to worry about these types; they are exported solely for the
+sake of annotation, should it be necessary.
+
+@docs FixInArgument, FixInLet, UseArgInstead, UseLetInstead, CreateNewLet, Fail, UseAsPattern, UseAsPatternOrFailOr, CreateNewLetOr, UseArgOrCreateNewLetOrFail, UseLetOr, UseLetOrFail, UseAsPatternOrLetsOrFail, Either
+
 -}
 
 import Dict exposing (Dict)
@@ -49,7 +58,6 @@ import Set exposing (Set)
 import Util
     exposing
         ( Binding
-        , Either(..)
         , addParensToNamedPattern
         , allBindingsInPattern
         , allBindingsUsedInExpression
@@ -222,8 +230,8 @@ fixInArgument =
     Config
         { fixBy =
             DestructureInArgument
-                { asPatternRequired = useAsPattern
-                , cannotDestructureAtArgument = fail
+                { ifAsPatternNeeded = useAsPattern
+                , ifCannotDestructure = fail
                 }
         }
 
@@ -306,7 +314,7 @@ fixInLet : Config FixInLet
 fixInLet =
     Config
         { fixBy =
-            DestructureInLet { noValidLetExists = createNewLet }
+            DestructureInLet { ifNoLetBlock = createNewLet }
         }
 
 
@@ -353,7 +361,7 @@ ifAsPatternRequired : UseAsPatternOrLetsOrFail -> Config FixInArgument -> Config
 ifAsPatternRequired e (Config r) =
     case r.fixBy of
         DestructureInArgument c ->
-            Config { r | fixBy = DestructureInArgument { c | asPatternRequired = e } }
+            Config { r | fixBy = DestructureInArgument { c | ifAsPatternNeeded = e } }
 
         DestructureInLet _ ->
             Config r
@@ -408,11 +416,11 @@ Available options are [`fixInLetInstead`](#fixInLetInstead) or [`fail`](#fail)
                 )
 
 -}
-ifCannotDestructureAtArgument : FallbackToLetsOrFail -> Config FixInArgument -> Config FixInArgument
+ifCannotDestructureAtArgument : UseLetOrFail -> Config FixInArgument -> Config FixInArgument
 ifCannotDestructureAtArgument e (Config r) =
     case r.fixBy of
         DestructureInArgument c ->
-            Config { r | fixBy = DestructureInArgument { c | cannotDestructureAtArgument = e } }
+            Config { r | fixBy = DestructureInArgument { c | ifCannotDestructure = e } }
 
         DestructureInLet _ ->
             Config r
@@ -445,24 +453,24 @@ in that order after [`fixInArgumentInstead`](#fixInArgumentInstead).
                 )
 
 -}
-ifNoLetExists : FallbackToArgOrCreateNewLetOrFail -> Config FixInLet -> Config FixInLet
+ifNoLetExists : UseArgOrCreateNewLetOrFail -> Config FixInLet -> Config FixInLet
 ifNoLetExists e (Config r) =
-    Config { r | fixBy = DestructureInLet { noValidLetExists = e } }
+    Config { r | fixBy = DestructureInLet { ifNoLetBlock = e } }
 
 
 {-| Fallback to destructuring in a `let` block instead of the argument.
 -}
-fixInLetInstead : a -> FallBackToLetsOr a b
+fixInLetInstead : a -> UseLetOr a b
 fixInLetInstead f =
-    FallbackToExistingLet { noValidLetExists = f }
-        |> A
-        |> A
+    UseLetInstead { ifNoLetBlock = f }
+        |> Util.A
+        |> Util.A
 
 
 {-| If no `let` block exists to destructure in, choose some other behavior
 instead.
 -}
-andIfNoLetExists : a -> (a -> FallBackToLetsOr a b) -> FallBackToLetsOr a b
+andIfNoLetExists : a -> (a -> UseLetOr a b) -> UseLetOr a b
 andIfNoLetExists fallback f =
     f <| fallback
 
@@ -482,14 +490,14 @@ in that order, e.g.
                 )
 
 -}
-fixInArgumentInstead : CanUseAsPatternOrFailOr CreateNewLet -> CreateNewLetOr Fail -> FallbackToArgOrCreateNewLetOrFail
-fixInArgumentInstead asPatternRequired cannotDestructureAtArgument =
-    FallbackToArgument
-        { asPatternRequired = asPatternRequired
-        , cannotDestructureAtArgument = cannotDestructureAtArgument
+fixInArgumentInstead : UseAsPatternOrFailOr CreateNewLet -> CreateNewLetOr Fail -> UseArgOrCreateNewLetOrFail
+fixInArgumentInstead ifAsPatternNeeded ifCannotDestructure =
+    UseArgInstead
+        { ifAsPatternNeeded = ifAsPatternNeeded
+        , ifCannotDestructure = ifCannotDestructure
         }
-        |> B
-        |> A
+        |> Util.B
+        |> Util.A
 
 
 {-| Specify what to do if an `as` pattern would be necessary.
@@ -522,16 +530,16 @@ Available options are [`useAsPattern`](#useAsPattern),
                 )
 
 -}
-andIfAsPatternRequired : CanUseAsPatternOrFailOr CreateNewLet -> (CanUseAsPatternOrFailOr CreateNewLet -> CreateNewLetOr Fail -> FallbackToArgOrCreateNewLetOrFail) -> (CreateNewLetOr Fail -> FallbackToArgOrCreateNewLetOrFail)
-andIfAsPatternRequired asPatternRequired f =
-    f asPatternRequired
+andIfAsPatternRequired : UseAsPatternOrFailOr CreateNewLet -> (UseAsPatternOrFailOr CreateNewLet -> CreateNewLetOr Fail -> UseArgOrCreateNewLetOrFail) -> (CreateNewLetOr Fail -> UseArgOrCreateNewLetOrFail)
+andIfAsPatternRequired ifAsPatternNeeded f =
+    f ifAsPatternNeeded
 
 
 {-| Choose to use an `as` pattern to destructure in the argument if necessary.
 -}
-useAsPattern : CanUseAsPatternOrFailOr or
+useAsPattern : UseAsPatternOrFailOr or
 useAsPattern =
-    A <| B UseAsPattern
+    Util.A <| Util.B UseAsPattern
 
 
 {-| Specify what to do if the argument cannot be destructured at, e.g.
@@ -560,23 +568,23 @@ Available options are [`createNewLet`](#createNewLet) or [`fail`](#fail)
                 )
 
 -}
-andIfCannotDestructureAtArgument : CreateNewLetOr Fail -> (CreateNewLetOr Fail -> FallbackToArgOrCreateNewLetOrFail) -> FallbackToArgOrCreateNewLetOrFail
-andIfCannotDestructureAtArgument cannotDestructureAtArgument f =
-    f cannotDestructureAtArgument
+andIfCannotDestructureAtArgument : CreateNewLetOr Fail -> (CreateNewLetOr Fail -> UseArgOrCreateNewLetOrFail) -> UseArgOrCreateNewLetOrFail
+andIfCannotDestructureAtArgument ifCannotDestructure f =
+    f ifCannotDestructure
 
 
 {-| Choose to create a `let` block when none exists.
 -}
 createNewLet : CreateNewLetOr or
 createNewLet =
-    A <| A CreateNewLet
+    Util.A <| Util.A CreateNewLet
 
 
 {-| Choose to fail at generating a fix.
 -}
 fail : Either or Fail
 fail =
-    B Fail
+    Util.B Fail
 
 
 {-| Specify how to automatically fix single-pattern cases.
@@ -586,33 +594,46 @@ fail =
 
 -}
 type FixBy
-    = DestructureInLet { noValidLetExists : FallbackToArgOrCreateNewLetOrFail }
+    = DestructureInLet { ifNoLetBlock : UseArgOrCreateNewLetOrFail }
     | DestructureInArgument
-        { asPatternRequired : UseAsPatternOrLetsOrFail
-        , cannotDestructureAtArgument : FallbackToLetsOrFail
+        { ifAsPatternNeeded : UseAsPatternOrLetsOrFail
+        , ifCannotDestructure : UseLetOrFail
         }
 
 
+{-| At this point, an `as` pattern could be used, or we could use a `let` block.
+-}
 type alias UseAsPatternOrLetsOrFail =
-    CanUseAsPatternOrFailOr (FallbackToExistingLet (CanUseAsPatternOrFailOr CreateNewLet))
+    UseAsPatternOrFailOr (UseLetInstead (UseAsPatternOrFailOr CreateNewLet))
 
 
-type alias FallbackToLetsOrFail =
-    FallBackToLetsOr (CreateNewLetOr Fail) Fail
+{-| At this point, the only option is to use a `let` block.
+-}
+type alias UseLetOrFail =
+    UseLetOr (CreateNewLetOr Fail) Fail
 
 
-type alias FallbackToArgOrCreateNewLetOrFail =
-    Either (Either CreateNewLet FallbackToArgument) Fail
+{-| At this point, the argument could be used or a new `let` block created.
+block.
+-}
+type alias UseArgOrCreateNewLetOrFail =
+    Either (Either CreateNewLet UseArgInstead) Fail
 
 
-type alias CanUseAsPatternOrFailOr or =
+{-| At this point, an `as` pattern could be used or some other option.
+-}
+type alias UseAsPatternOrFailOr or =
     Either (Either or UseAsPattern) Fail
 
 
-type alias FallBackToLetsOr a b =
-    Either (Either (FallbackToExistingLet a) b) Fail
+{-| At this point, a `let` could be used or either of two other options.
+-}
+type alias UseLetOr or1 or2 =
+    Either (Either (UseLetInstead or1) or2) Fail
 
 
+{-| At this point, a new `let` could be created or some other option.
+-}
 type alias CreateNewLetOr or =
     Either (Either CreateNewLet or) Fail
 
@@ -638,18 +659,24 @@ type UseAsPattern
 {-| Fallback to destructuring in the argument, if choosing not to create a `let`
 block.
 -}
-type FallbackToArgument
-    = FallbackToArgument
-        { asPatternRequired : CanUseAsPatternOrFailOr CreateNewLet
-        , cannotDestructureAtArgument : CreateNewLetOr Fail
+type UseArgInstead
+    = UseArgInstead
+        { ifAsPatternNeeded : UseAsPatternOrFailOr CreateNewLet
+        , ifCannotDestructure : CreateNewLetOr Fail
         }
 
 
 {-| Fallback to using a `let` block if destructuring in the argument has failed
 (or we've chosen not to).
 -}
-type FallbackToExistingLet noValidLetOptions
-    = FallbackToExistingLet { noValidLetExists : noValidLetOptions }
+type UseLetInstead noValidLetOptions
+    = UseLetInstead { ifNoLetBlock : noValidLetOptions }
+
+
+{-| Offer a choice between two options.
+-}
+type alias Either a b =
+    Util.Either a b
 
 
 {-| Check a TLD for single-pattern cases.
@@ -691,6 +718,7 @@ type alias LocalContext =
 checkExpression : Config fixBy -> LocalContext -> Node Expression -> List (Error {})
 checkExpression config ({ bindings } as context) expressionNode =
     let
+        go : Maybe LetBlock -> List ( String, Binding ) -> Node Expression -> List (Error {})
         go newLet extraPatterns =
             case ( extraPatterns, newLet ) of
                 ( [], Nothing ) ->
@@ -741,10 +769,11 @@ checkExpression config ({ bindings } as context) expressionNode =
                                 go Nothing (allBindingsInPattern (Node.value e) p) e
                             )
 
-        LetExpression letBlock ->
+        LetExpression lB ->
             let
-                newVarsInLetDeclaration (Node _ letDeclaration) =
-                    case letDeclaration of
+                bindingsInDecl : Node LetDeclaration -> List ( String, Binding )
+                bindingsInDecl d =
+                    case Node.value d of
                         LetDestructuring pattern _ ->
                             allBindingsInPattern (Node.value expressionNode) pattern
 
@@ -761,29 +790,28 @@ checkExpression config ({ bindings } as context) expressionNode =
                               )
                             ]
 
-                checkExpressionInThisLetBlock newPatterns =
-                    List.concatMap newVarsInLetDeclaration letBlock.declarations
-                        ++ newPatterns
-                        |> go (Just letBlock)
+                letBindings : List ( String, Binding )
+                letBindings =
+                    List.concatMap bindingsInDecl lB.declarations
 
-                checkLetDeclaration (Node _ letDeclaration) =
-                    case letDeclaration of
+                checkDecl : Node LetDeclaration -> List (Error {})
+                checkDecl d =
+                    case Node.value d of
                         LetFunction fun ->
                             let
                                 { expression, arguments } =
                                     Node.value fun.declaration
                             in
-                            checkExpressionInThisLetBlock
-                                (arguments
-                                    |> List.concatMap (allBindingsInPattern (Node.value expression))
-                                )
-                                expression
+                            List.concatMap (allBindingsInPattern (Node.value expression)) arguments
+                                |> (\bs ->
+                                        go (Just lB) (bs ++ letBindings) expression
+                                   )
 
                         LetDestructuring _ expr ->
-                            checkExpressionInThisLetBlock [] expr
+                            go (Just lB) letBindings expr
             in
-            checkExpressionInThisLetBlock [] letBlock.expression
-                ++ List.concatMap checkLetDeclaration letBlock.declarations
+            go (Just lB) letBindings lB.expression
+                ++ List.concatMap checkDecl lB.declarations
 
         LambdaExpression { args, expression } ->
             -- Add arg bindings
@@ -810,12 +838,6 @@ type alias SinglePatternCaseInfo =
 -}
 singlePatternCaseError : Config fixBy -> SinglePatternCaseInfo -> Error {}
 singlePatternCaseError config info =
-    let
-        errorInfo =
-            { message = "Single pattern case block."
-            , details = [ "Single pattern case blocks typically are either unnecessary or overly verbose.  There's usually a more concise way to destructure, e.g. in a function argument, so consider refactoring." ]
-            }
-    in
     (-- Check for useless cases.  This is also caught by `elm-review-simplify`,
      -- but we'll handle it in case they don't have that in their review config.
      -- Just use unit as "scope" here since all we care about is if any bindings are made
@@ -826,7 +848,11 @@ singlePatternCaseError config info =
         makeFix config info
             |> Maybe.withDefault []
     )
-        |> Rule.errorWithFix errorInfo info.caseRange
+        |> Rule.errorWithFix
+            { message = "Single pattern case block."
+            , details = [ "Single pattern case blocks typically are either unnecessary or overly verbose.  There's usually a more concise way to destructure, e.g. in a function argument, so consider refactoring." ]
+            }
+            info.caseRange
 
 
 {-| Given config and info about a single pattern case, try to create a fix per
@@ -835,57 +861,57 @@ the config or fail.
 makeFix : Config fixBy -> SinglePatternCaseInfo -> Maybe (List Fix)
 makeFix (Config { fixBy }) { context, expressionInCaseOf, singleCaseExpression, caseRange, singleCasePattern } =
     let
-        destructureInLetFix : (Either a b -> Maybe (List Fix)) -> Either (Either a b) Fail -> Maybe (List Fix)
-        destructureInLetFix fallback noValidLetExists =
+        destructureInLet : (Either a b -> Maybe (List Fix)) -> Either (Either a b) Fail -> Maybe (List Fix)
+        destructureInLet fallback ifNoLetBlock =
             case getValidLetBlock context expressionInCaseOf ( singleCasePattern, singleCaseExpression ) of
                 Just existingLetBlock ->
                     [ moveCasePatternToLetBlock ( expressionInCaseOf, caseRange ) ( singleCasePattern, singleCaseExpression ) existingLetBlock ]
                         |> Just
 
                 Nothing ->
-                    either fallback orFail noValidLetExists
+                    either fallback orFail ifNoLetBlock
 
         useNewLet : CreateNewLet -> Maybe (List Fix)
         useNewLet CreateNewLet =
             Just <| fixInNewLet ( expressionInCaseOf, caseRange ) ( singleCasePattern, singleCaseExpression )
 
-        fallbackToArg : FallbackToArgument -> Maybe (List Fix)
-        fallbackToArg (FallbackToArgument { asPatternRequired, cannotDestructureAtArgument }) =
-            destructureInArgFix (always useNewLet) useNewLet asPatternRequired cannotDestructureAtArgument
+        fallbackToArg : UseArgInstead -> Maybe (List Fix)
+        fallbackToArg (UseArgInstead { ifAsPatternNeeded, ifCannotDestructure }) =
+            destructureInArg (always useNewLet) useNewLet ifAsPatternNeeded ifCannotDestructure
 
         orFail : Fail -> Maybe (List Fix)
         orFail Fail =
             Nothing
 
-        fallbackToLet : (a -> Maybe (List Fix)) -> (b -> Maybe (List Fix)) -> FallbackToExistingLet (Either (Either a b) Fail) -> Maybe (List Fix)
-        fallbackToLet fA fB (FallbackToExistingLet { noValidLetExists }) =
-            destructureInLetFix (either fA fB) noValidLetExists
+        fallbackToLet : (a -> Maybe (List Fix)) -> (b -> Maybe (List Fix)) -> UseLetInstead (Either (Either a b) Fail) -> Maybe (List Fix)
+        fallbackToLet fA fB (UseLetInstead { ifNoLetBlock }) =
+            destructureInLet (either fA fB) ifNoLetBlock
 
         orUseAsPattern : ( String, Binding ) -> UseAsPattern -> Maybe (List Fix)
         orUseAsPattern ( name, binding ) UseAsPattern =
             moveCasePatternToBinding caseRange binding (Just name) ( singleCasePattern, singleCaseExpression )
                 |> Just
 
-        destructureInArgFix : (( String, Binding ) -> asFallback -> Maybe (List Fix)) -> (destructureFallback -> Maybe (List Fix)) -> Either (Either asFallback UseAsPattern) Fail -> Either (Either destructureFallback Fail) Fail -> Maybe (List Fix)
-        destructureInArgFix asFallback destructureFallback asPatternRequired cannotDestructureAtArgument =
+        destructureInArg : (( String, Binding ) -> asFallback -> Maybe (List Fix)) -> (destructureFallback -> Maybe (List Fix)) -> Either (Either asFallback UseAsPattern) Fail -> Either (Either destructureFallback Fail) Fail -> Maybe (List Fix)
+        destructureInArg asFallback destructureFallback ifAsPatternNeeded ifCannotDestructure =
             case getValidPatternBinding context expressionInCaseOf ( singleCasePattern, singleCaseExpression ) of
                 Just { name, binding, requiresAsPattern } ->
                     if requiresAsPattern then
-                        either (either (asFallback ( name, binding )) (orUseAsPattern ( name, binding ))) orFail asPatternRequired
+                        either (either (asFallback ( name, binding )) (orUseAsPattern ( name, binding ))) orFail ifAsPatternNeeded
 
                     else
                         moveCasePatternToBinding caseRange binding Nothing ( singleCasePattern, singleCaseExpression )
                             |> Just
 
                 Nothing ->
-                    either (either destructureFallback orFail) orFail cannotDestructureAtArgument
+                    either (either destructureFallback orFail) orFail ifCannotDestructure
     in
     case fixBy of
-        DestructureInLet { noValidLetExists } ->
-            destructureInLetFix (either useNewLet fallbackToArg) noValidLetExists
+        DestructureInLet { ifNoLetBlock } ->
+            destructureInLet (either useNewLet fallbackToArg) ifNoLetBlock
 
-        DestructureInArgument { asPatternRequired, cannotDestructureAtArgument } ->
-            destructureInArgFix (\b -> fallbackToLet useNewLet (orUseAsPattern b)) (fallbackToLet useNewLet orFail) asPatternRequired cannotDestructureAtArgument
+        DestructureInArgument { ifAsPatternNeeded, ifCannotDestructure } ->
+            destructureInArg (\b -> fallbackToLet useNewLet (orUseAsPattern b)) (fallbackToLet useNewLet orFail) ifAsPatternNeeded ifCannotDestructure
 
 
 {-| Given the full range of a `case` block, a binding to destructure at, maybe a
@@ -943,6 +969,7 @@ from `getValidLetBlock`.
 moveCasePatternToLetBlock : ( Expression, Range ) -> ( Node Pattern, Expression ) -> ( LetBlock, Range ) -> Fix
 moveCasePatternToLetBlock ( caseExpr, caseRange ) ( replacePattern, replaceExpression ) ( { declarations, expression }, letRange ) =
     let
+        go : Node Expression -> Expression
         go e =
             if Node.range e == caseRange then
                 replaceExpression
