@@ -824,113 +824,68 @@ singlePatternCaseError config info =
 
      else
         makeFix config info
+            |> Maybe.withDefault []
     )
         |> Rule.errorWithFix errorInfo info.caseRange
 
 
-        { context, expressionInCaseOf, singleCaseExpression, caseRange, singleCasePattern } =
-            information
-
-        fix =
-            case fixKind of
-                FixByDestructuringInExistingLets { noExistingLets } ->
-                    fixInExistingLets
-                        { noExistingLets =
-                            noExistingLets
-                                |> onlyCreatingSeparateLetLeftFixOr
-                                    (\(DestructureTheArgument { argumentAlsoUsedElsewhere }) ->
-                                        case getDestructurablePattern expressionInCaseOf of
-                                            Just varInCaseOf ->
-                                                replaceVarPatternFixIfUsedOnce varInCaseOf
-                                                    { usedOften =
-                                                        argumentAlsoUsedElsewhere
-                                                            |> onlyCreatingSeparateLetLeftFixOr
-                                                                (\DestructureUsingAs ->
-                                                                    destructureAsFix varInCaseOf
-                                                                )
-                                                    }
-
-                                            Nothing ->
-                                                onlySeparateLetFixLeftFix ()
-                                    )
-                        }
-
-                FixByDestructuringTheArgument { argumentAlsoUsedElsewhere, notDestructurable } ->
-                    case getDestructurablePattern expressionInCaseOf of
-                        Just varInCaseOf ->
-                            replaceVarPatternFixIfUsedOnce varInCaseOf
-                                { usedOften =
-                                    case argumentAlsoUsedElsewhere of
-                                        UseAsInstead ->
-                                            destructureAsFix varInCaseOf
-
-                                        DestructureInExistingLetsInstead { noExistingLets } ->
-                                            fixInExistingLets
-                                                { noExistingLets =
-                                                    noExistingLets
-                                                        |> onlyCreatingSeparateLetLeftFixOr
-                                                            (\DestructureUsingAs ->
-                                                                destructureAsFix varInCaseOf
-                                                            )
-                                                }
-                                }
-
-                        Nothing ->
-                            notDestructurable
-                                |> onlyCreatingSeparateLetLeftFixOr
-                                    (\DestructureInExistingLets ->
-                                        fixInExistingLets
-                                            { noExistingLets =
-                                                onlySeparateLetFixLeftFix ()
-                                            }
-                                    )
-
-        replaceVarPatternFixIfUsedOnce varInCaseOf { usedOften } =
-            case countUsesIn varInCaseOf.scope varInCaseOf.name of
-                1 ->
-                    replaceVarPatternFix
-                        { varRange = varInCaseOf.patternNodeRange
-                        , varPatternScope = varInCaseOf.scope
-                        }
-
-                _ ->
-                    usedOften
-
-        getDestructurablePattern expression =
-            case expression of
-                FunctionOrValue [] varName ->
-                    Dict.get varName context.bindings
-                        |> Maybe.andThen
-                            (\{ patternNodeRange, canDestructureAt, scope } ->
-                                if canDestructureAt then
-                                    Just
-                                        { name = varName
-                                        , patternNodeRange = patternNodeRange
-                                        , scope = scope
-                                        }
-
-                                else
-                                    Nothing
-                            )
-
-                _ ->
-                    Nothing
-
-        fixInExistingLets { noExistingLets } =
-            case context.closestLetBlock of
+{-| Given config and info about a single pattern case, try to create a fix per
+the config or fail.
+-}
+makeFix : Config fixBy -> SinglePatternCaseInfo -> Maybe (List Fix)
+makeFix (Config { fixBy }) { context, expressionInCaseOf, singleCaseExpression, caseRange, singleCasePattern } =
+    let
+        destructureInLetFix : (Either a b -> Maybe (List Fix)) -> Either (Either a b) Fail -> Maybe (List Fix)
+        destructureInLetFix fallback noValidLetExists =
+            case getValidLetBlock context expressionInCaseOf ( singleCasePattern, singleCaseExpression ) of
                 Just existingLetBlock ->
-                    fixInLetBlock existingLetBlock
+                    [ moveCasePatternToLetBlock ( expressionInCaseOf, caseRange ) ( singleCasePattern, singleCaseExpression ) existingLetBlock ]
+                        |> Just
 
                 Nothing ->
-                    noExistingLets
+                    either fallback orFail noValidLetExists
 
-        onlyCreatingSeparateLetLeftFixOr inFix options =
-            case options of
-                OnlyFixInSeparateLetLeftFix ->
-                    onlySeparateLetFixLeftFix ()
+        useNewLet : CreateNewLet -> Maybe (List Fix)
+        useNewLet CreateNewLet =
+            Just <| fixInNewLet ( expressionInCaseOf, caseRange ) ( singleCasePattern, singleCaseExpression )
 
-                Fix option ->
-                    inFix option
+        fallbackToArg : FallbackToArgument -> Maybe (List Fix)
+        fallbackToArg (FallbackToArgument { asPatternRequired, cannotDestructureAtArgument }) =
+            destructureInArgFix (always useNewLet) useNewLet asPatternRequired cannotDestructureAtArgument
+
+        orFail : Fail -> Maybe (List Fix)
+        orFail Fail =
+            Nothing
+
+        fallbackToLet : (a -> Maybe (List Fix)) -> (b -> Maybe (List Fix)) -> FallbackToExistingLet (Either (Either a b) Fail) -> Maybe (List Fix)
+        fallbackToLet fA fB (FallbackToExistingLet { noValidLetExists }) =
+            destructureInLetFix (either fA fB) noValidLetExists
+
+        orUseAsPattern : ( String, Binding ) -> UseAsPattern -> Maybe (List Fix)
+        orUseAsPattern ( name, binding ) UseAsPattern =
+            moveCasePatternToBinding caseRange binding (Just name) ( singleCasePattern, singleCaseExpression )
+                |> Just
+
+        destructureInArgFix : (( String, Binding ) -> asFallback -> Maybe (List Fix)) -> (destructureFallback -> Maybe (List Fix)) -> Either (Either asFallback UseAsPattern) Fail -> Either (Either destructureFallback Fail) Fail -> Maybe (List Fix)
+        destructureInArgFix asFallback destructureFallback asPatternRequired cannotDestructureAtArgument =
+            case getValidPatternBinding context expressionInCaseOf ( singleCasePattern, singleCaseExpression ) of
+                Just { name, binding, requiresAsPattern } ->
+                    if requiresAsPattern then
+                        either (either (asFallback ( name, binding )) (orUseAsPattern ( name, binding ))) orFail asPatternRequired
+
+                    else
+                        moveCasePatternToBinding caseRange binding Nothing ( singleCasePattern, singleCaseExpression )
+                            |> Just
+
+                Nothing ->
+                    either (either destructureFallback orFail) orFail cannotDestructureAtArgument
+    in
+    case fixBy of
+        DestructureInLet { noValidLetExists } ->
+            destructureInLetFix (either useNewLet fallbackToArg) noValidLetExists
+
+        DestructureInArgument { asPatternRequired, cannotDestructureAtArgument } ->
+            destructureInArgFix (\b -> fallbackToLet useNewLet (orUseAsPattern b)) (fallbackToLet useNewLet orFail) asPatternRequired cannotDestructureAtArgument
 
 
 {-| Given the full range of a `case` block, a binding to destructure at, maybe a
