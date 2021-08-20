@@ -1,6 +1,20 @@
 module NoSinglePatternCaseTest exposing (all)
 
-import NoSinglePatternCase exposing (alwaysFixInArgument, alwaysFixInLet, destructureAs, destructureInExistingLetsInstead, destructureTheArgument, fixByDestructuringInExistingLets, fixByDestructuringTheArgument, noFix, noFixOnNameClash, rule)
+import NoSinglePatternCase
+    exposing
+        ( andIfAsPatternRequired
+        , andIfCannotDestructureAtArgument
+        , andIfNoLetExists
+        , fail
+        , fixInArgument
+        , fixInArgumentInstead
+        , fixInLet
+        , fixInLetInstead
+        , ifAsPatternRequired
+        , ifNoLetExists
+        , rule
+        , useAsPattern
+        )
 import Review.Test
 import Test exposing (Test, describe, test)
 
@@ -26,7 +40,7 @@ isA aOrB =
         A -> True
         B -> False
 """
-                    |> Review.Test.run (rule alwaysFixInArgument)
+                    |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectNoErrors
         ]
 
@@ -54,13 +68,13 @@ always2 a =
     case a of
         _ -> 2
 """
-                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.run (rule fixInArgument)
                             |> Review.Test.expectErrors
                                 [ error """case a of
         _ -> 2""" |> Review.Test.whenFixed """module A exposing (..)
 
 always2 : a -> Int
-always2 _ =
+always2 a =
     2
 """
                                 ]
@@ -73,14 +87,14 @@ pointless unit =
     case unit of
         () -> True
 """
-                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.run (rule fixInArgument)
                             |> Review.Test.expectErrors
                                 [ error """case unit of
         () -> True"""
                                     |> Review.Test.whenFixed """module A exposing (..)
 
 pointless : () -> Bool
-pointless () =
+pointless unit =
     True
 """
                                 ]
@@ -95,7 +109,7 @@ add2 n =
     case n of
         _ -> n + 2
 """
-                    |> Review.Test.run (rule alwaysFixInArgument)
+                    |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
                         [ error """case n of
         _ -> n + 2""" |> Review.Test.whenFixed """module A exposing (..)
@@ -103,6 +117,25 @@ add2 n =
 add2 : number -> number
 add2 n =
     n + 2
+"""
+                        ]
+        , test "not possible due to non-destructurable pattern" <|
+            \() ->
+                """module A exposing (..)
+
+add2 : {n : number} -> number
+add2 {n} =
+    case n of
+        _ -> 2
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error """case n of
+        _ -> 2""" |> Review.Test.whenFixed """module A exposing (..)
+
+add2 : {n : number} -> number
+add2 {n} =
+    2
 """
                         ]
         , test "(don't) destructure in existing lets" <|
@@ -118,7 +151,7 @@ always2 a =
     case a of
         _ -> 2
 """
-                    |> Review.Test.run (rule alwaysFixInLet)
+                    |> Review.Test.run (rule fixInLet)
                     |> Review.Test.expectErrors
                         [ error """case a of
         _ -> 2""" |> Review.Test.whenFixed """module A exposing (..)
@@ -150,7 +183,7 @@ unpack o =
     case o of
         Opaque i -> i
 """
-                        |> Review.Test.run (rule alwaysFixInArgument)
+                        |> Review.Test.run (rule fixInArgument)
                         |> Review.Test.expectErrors
                             [ error """case o of
         Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
@@ -160,6 +193,25 @@ type Opaque = Opaque Int
 unpack : Opaque -> Int
 unpack (Opaque i) =
     i
+"""
+                            ]
+            , test "can fix when expression contains binding multiple times" <|
+                \() ->
+                    """module A exposing (..)
+type Opaque = Opaque Int
+unpack : Opaque -> Int
+unpack o =
+    case o of
+        Opaque i -> i + i
+"""
+                        |> Review.Test.run (rule fixInArgument)
+                        |> Review.Test.expectErrors
+                            [ error """case o of
+        Opaque i -> i + i""" |> Review.Test.whenFixed """module A exposing (..)
+type Opaque = Opaque Int
+unpack : Opaque -> Int
+unpack (Opaque i) =
+    i + i
 """
                             ]
             , test "var pattern in destructuring let" <|
@@ -180,7 +232,7 @@ unpack ((Opaque ii) as oo) =
     in
     unpacked
 """
-                        |> Review.Test.run (rule alwaysFixInArgument)
+                        |> Review.Test.run (rule fixInArgument)
                         |> Review.Test.expectErrors
                             [ error """case o of
                 Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
@@ -210,7 +262,7 @@ withUnpacked map =
     case map of
         Opaque i -> ( i, List.map ((+) 1) [ 1 ] )
 """
-                        |> Review.Test.run (rule alwaysFixInArgument)
+                        |> Review.Test.run (rule fixInArgument)
                         |> Review.Test.expectErrors
                             [ error """case map of
         Opaque i -> ( i, List.map ((+) 1) [ 1 ] )"""
@@ -237,7 +289,7 @@ withUnpacked o =
     case o of
         Opaque i -> ( i, o )
 """
-                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.run (rule fixInArgument)
                             |> Review.Test.expectErrors
                                 [ error """case o of
         Opaque i -> ( i, o )""" |> Review.Test.whenFixed """module A exposing (..)
@@ -266,7 +318,7 @@ withUnpacked aOrB =
             case o of
                 Opaque i -> ( i - 1, o )
 """
-                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.run (rule fixInArgument)
                             |> Review.Test.expectErrors
                                 [ error """case o of
                 Opaque i -> ( i + 1, o )"""
@@ -322,15 +374,12 @@ withUnpacked o =
         Opaque i -> ( i, o )
 """
                                 |> Review.Test.run
-                                    (rule
-                                        (fixByDestructuringTheArgument
-                                            { argumentAlsoUsedElsewhere =
-                                                destructureInExistingLetsInstead
-                                                    { noExistingLets = destructureAs }
-                                            , notDestructurable = noFix
-                                            }
-                                            |> noFixOnNameClash
-                                        )
+                                    (fixInArgument
+                                        |> ifAsPatternRequired
+                                            (fixInLetInstead
+                                                |> andIfNoLetExists useAsPattern
+                                            )
+                                        |> rule
                                     )
                                 |> Review.Test.expectErrors
                                     [ error """case o of
@@ -361,17 +410,12 @@ withUnpacked o =
         Opaque i -> ( i, o )
 """
                                 |> Review.Test.run
-                                    (rule
-                                        (fixByDestructuringTheArgument
-                                            { argumentAlsoUsedElsewhere =
-                                                destructureInExistingLetsInstead
-                                                    { noExistingLets =
-                                                        destructureAs
-                                                    }
-                                            , notDestructurable = noFix
-                                            }
-                                            |> noFixOnNameClash
-                                        )
+                                    (fixInArgument
+                                        |> ifAsPatternRequired
+                                            (fixInLetInstead
+                                                |> andIfNoLetExists useAsPattern
+                                            )
+                                        |> rule
                                     )
                                 |> Review.Test.expectErrors
                                     [ error """case o of
@@ -397,7 +441,7 @@ unpack o =
     case ( o, o ) of
         ( Opaque i, Opaque ii ) -> i
 """
-                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.run (rule fixInArgument)
                             |> Review.Test.expectErrors
                                 [ error """case ( o, o ) of
         ( Opaque i, Opaque ii ) -> i"""
@@ -417,7 +461,7 @@ unpacked =
     case topLevel of
         Opaque i -> i
 """
-                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.run (rule fixInArgument)
                             |> Review.Test.expectErrors
                                 [ error """case topLevel of
         Opaque i -> i"""
@@ -433,7 +477,7 @@ unpack ((Opaque ii) as o) =
     case o of
         Opaque i -> i
 """
-                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.run (rule fixInArgument)
                             |> Review.Test.expectErrors
                                 [ error """case o of
         Opaque i -> i"""
@@ -449,7 +493,7 @@ unpack { o } =
     case o of
         Opaque i -> i
 """
-                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.run (rule fixInArgument)
                             |> Review.Test.expectErrors
                                 [ error """case o of
         Opaque i -> i"""
@@ -473,7 +517,7 @@ unpack oo =
     in
     unpacked
 """
-                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.run (rule fixInArgument)
                             |> Review.Test.expectErrors
                                 [ error """case o of
                 Opaque i -> i"""
@@ -491,7 +535,7 @@ unpack o =
     case o of
         Opaque i -> i
 """
-                            |> Review.Test.run (rule alwaysFixInArgument)
+                            |> Review.Test.run (rule fixInArgument)
                             |> Review.Test.expectErrors
                                 [ error """case o of
         Opaque i -> i"""
@@ -519,7 +563,7 @@ unpack o =
     case o of
         Opaque i -> i
 """
-                    |> Review.Test.run (rule alwaysFixInLet)
+                    |> Review.Test.run (rule fixInLet)
                     |> Review.Test.expectErrors
                         [ error """case o of
         Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
@@ -538,7 +582,7 @@ unpack o =
     i
 """
                         ]
-        , test "impossible due to reliance on scope from closest let" <|
+        , test "impossible due to reliance on scope" <|
             \() ->
                 """module A exposing (..)
 
@@ -555,7 +599,11 @@ unpack o =
         Opaque i -> i
         ) o
 """
-                    |> Review.Test.run (rule alwaysFixInLet)
+                    |> Review.Test.run
+                        (fixInLet
+                            |> ifNoLetExists fail
+                            |> rule
+                        )
                     |> Review.Test.expectErrors
                         [ error """case a of
         Opaque i -> i"""
@@ -573,14 +621,13 @@ unpack o =
         Opaque i -> i
 """
                         |> Review.Test.run
-                            (rule
-                                (fixByDestructuringInExistingLets
-                                    { noExistingLets =
-                                        destructureTheArgument
-                                            { argumentAlsoUsedElsewhere = destructureAs }
-                                    }
-                                    |> noFixOnNameClash
-                                )
+                            (fixInLet
+                                |> ifNoLetExists
+                                    (fixInArgumentInstead
+                                        |> andIfAsPatternRequired useAsPattern
+                                        |> andIfCannotDestructureAtArgument fail
+                                    )
+                                |> rule
                             )
                         |> Review.Test.expectErrors
                             [ error """case o of
@@ -605,16 +652,13 @@ unpack o =
         Opaque i -> ( o, i )
 """
                         |> Review.Test.run
-                            (rule
-                                (fixByDestructuringInExistingLets
-                                    { noExistingLets =
-                                        destructureTheArgument
-                                            { argumentAlsoUsedElsewhere =
-                                                destructureAs
-                                            }
-                                    }
-                                    |> noFixOnNameClash
-                                )
+                            (fixInLet
+                                |> ifNoLetExists
+                                    (fixInArgumentInstead
+                                        |> andIfAsPatternRequired useAsPattern
+                                        |> andIfCannotDestructureAtArgument fail
+                                    )
+                                |> rule
                             )
                         |> Review.Test.expectErrors
                             [ error """case o of
@@ -639,16 +683,13 @@ unpack { o } =
         Opaque i -> i
 """
                         |> Review.Test.run
-                            (rule
-                                (fixByDestructuringInExistingLets
-                                    { noExistingLets =
-                                        destructureTheArgument
-                                            { argumentAlsoUsedElsewhere =
-                                                destructureAs
-                                            }
-                                    }
-                                    |> noFixOnNameClash
-                                )
+                            (fixInLet
+                                |> ifNoLetExists
+                                    (fixInArgumentInstead
+                                        |> andIfAsPatternRequired useAsPattern
+                                        |> andIfCannotDestructureAtArgument fail
+                                    )
+                                |> rule
                             )
                         |> Review.Test.expectErrors
                             [ error """case o of
@@ -666,16 +707,13 @@ unpack o =
         ( Opaque i, Opaque ii ) -> i
 """
                         |> Review.Test.run
-                            (rule
-                                (fixByDestructuringInExistingLets
-                                    { noExistingLets =
-                                        destructureTheArgument
-                                            { argumentAlsoUsedElsewhere =
-                                                destructureAs
-                                            }
-                                    }
-                                    |> noFixOnNameClash
-                                )
+                            (fixInLet
+                                |> ifNoLetExists
+                                    (fixInArgumentInstead
+                                        |> andIfAsPatternRequired useAsPattern
+                                        |> andIfCannotDestructureAtArgument fail
+                                    )
+                                |> rule
                             )
                         |> Review.Test.expectErrors
                             [ error """case ( o, o ) of
@@ -696,11 +734,9 @@ unpack o =
         Opaque i -> i
 """
                     |> Review.Test.run
-                        (rule
-                            (fixByDestructuringInExistingLets
-                                { noExistingLets = noFix }
-                                |> noFixOnNameClash
-                            )
+                        (fixInLet
+                            |> ifNoLetExists fail
+                            |> rule
                         )
                     |> Review.Test.expectErrors
                         [ error """case o of
