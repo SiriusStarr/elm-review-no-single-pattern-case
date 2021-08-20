@@ -38,21 +38,24 @@ Look at the examples in those to understand how to use them.
 import Dict exposing (Dict)
 import Elm.CodeGen exposing (asPattern, letDestructuring, letExpr)
 import Elm.Syntax.Declaration exposing (Declaration(..))
-import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
+import Elm.Syntax.Expression exposing (Expression(..), LetBlock, LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node(..))
 import Elm.Syntax.Pattern exposing (Pattern)
 import Elm.Syntax.Range exposing (Range, emptyRange)
-import Review.Fix as Fix
+import Maybe.Extra as MaybeX
+import Review.Fix as Fix exposing (Fix)
 import Review.Rule as Rule exposing (Error, Rule)
+import Set exposing (Set)
 import Util
     exposing
         ( Binding
         , Either(..)
         , addParensToNamedPattern
         , allBindingsInPattern
-        , countUsesIn
+        , allBindingsUsedInExpression
         , either
         , mapSubexpressions
+        , nameUsedOutsideExpr
         , prettyExpressionReplacing
         , prettyPrintPattern
         , subexpressions
@@ -664,6 +667,7 @@ checkDeclaration config d =
                     List.concatMap (allBindingsInPattern (Node.value expression)) arguments
                         |> Dict.fromList
                 , closestLetBlock = Nothing
+                , newBindingsSinceLastLet = Set.empty
                 }
                 expression
 
@@ -675,41 +679,45 @@ type alias LocalContext =
     { bindings : Dict String Binding
     , closestLetBlock :
         Maybe
-            { declarations : List LetDeclaration
-            , expression : Node Expression
-            , blockRange : Range
+            { expression : Node Expression
+            , letBlock : LetBlock
             }
+    , newBindingsSinceLastLet : Set String
     }
 
 
 {-| Given a context, check an `Expression` for single-pattern cases.
 -}
 checkExpression : Config fixBy -> LocalContext -> Node Expression -> List (Error {})
-checkExpression config ({ bindings, closestLetBlock } as context) expressionNode =
+checkExpression config ({ bindings } as context) expressionNode =
     let
-        checkExpressionHereWith { extraPatterns, newClosestLetBlock } =
-            checkExpression config
-                { bindings =
-                    Dict.fromList extraPatterns
-                        |> Dict.union bindings
-                , closestLetBlock =
-                    case newClosestLetBlock of
-                        Just { expression, declarations } ->
-                            Just
-                                { blockRange = Node.range expressionNode
-                                , expression = expression
-                                , declarations = List.map Node.value declarations
-                                }
+        go newLet extraPatterns =
+            case ( extraPatterns, newLet ) of
+                ( [], Nothing ) ->
+                    checkExpression config context
 
-                        Nothing ->
-                            closestLetBlock
-                }
+                ( bs, Just l ) ->
+                    checkExpression config
+                        { context
+                            | bindings =
+                                Dict.fromList bs
+                                    |> Dict.union bindings
+                            , closestLetBlock =
+                                Just <| { letBlock = l, expression = expressionNode }
+                            , newBindingsSinceLastLet = Set.empty
+                        }
 
-        go extraPatterns =
-            checkExpressionHereWith
-                { extraPatterns = extraPatterns
-                , newClosestLetBlock = Nothing
-                }
+                ( bs, Nothing ) ->
+                    checkExpression config
+                        { context
+                            | bindings =
+                                Dict.fromList bs
+                                    |> Dict.union bindings
+                            , newBindingsSinceLastLet =
+                                List.map Tuple.first bs
+                                    |> Set.fromList
+                                    |> Set.union context.newBindingsSinceLastLet
+                        }
     in
     case Node.value expressionNode of
         CaseExpression caseBlock ->
@@ -730,7 +738,7 @@ checkExpression config ({ bindings, closestLetBlock } as context) expressionNode
                         |> List.concatMap
                             (\( p, e ) ->
                                 -- Add pattern match bindings
-                                go (allBindingsInPattern (Node.value e) p) e
+                                go Nothing (allBindingsInPattern (Node.value e) p) e
                             )
 
         LetExpression letBlock ->
@@ -754,10 +762,9 @@ checkExpression config ({ bindings, closestLetBlock } as context) expressionNode
                             ]
 
                 checkExpressionInThisLetBlock newPatterns =
-                    checkExpressionHereWith
-                        { extraPatterns = List.concatMap newVarsInLetDeclaration letBlock.declarations ++ newPatterns
-                        , newClosestLetBlock = Just letBlock
-                        }
+                    List.concatMap newVarsInLetDeclaration letBlock.declarations
+                        ++ newPatterns
+                        |> go (Just letBlock)
 
                 checkLetDeclaration (Node _ letDeclaration) =
                     case letDeclaration of
@@ -778,9 +785,16 @@ checkExpression config ({ bindings, closestLetBlock } as context) expressionNode
             checkExpressionInThisLetBlock [] letBlock.expression
                 ++ List.concatMap checkLetDeclaration letBlock.declarations
 
-        otherExpression ->
-            subexpressions otherExpression
-                |> List.concatMap (go [])
+        LambdaExpression { args, expression } ->
+            -- Add arg bindings
+            List.concatMap (allBindingsInPattern <| Node.value expression) args
+                |> (\bs ->
+                        go Nothing bs expression
+                   )
+
+        expressionWithoutBindings ->
+            subexpressions expressionWithoutBindings
+                |> List.concatMap (go Nothing [])
 
 
 type alias SinglePatternCaseInfo =
