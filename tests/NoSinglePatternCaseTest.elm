@@ -52,7 +52,7 @@ disallowed =
     describe "does not allow"
         [ uselessPattern
         , fixInArgSuite
-        , destructureInExistingLetsTest
+        , fixInLetSuite
         ]
 
 
@@ -171,7 +171,9 @@ unpack (Opaque i) =
         , test "expression contains binding multiple times" <|
             \() ->
                 """module A exposing (..)
+
 type Opaque = Opaque Int
+
 unpack : Opaque -> Int
 unpack o =
     case o of
@@ -181,7 +183,9 @@ unpack o =
                     |> Review.Test.expectErrors
                         [ error """case o of
         Opaque i -> i + i""" |> Review.Test.whenFixed """module A exposing (..)
+
 type Opaque = Opaque Int
+
 unpack : Opaque -> Int
 unpack (Opaque i) =
     i + i
@@ -243,13 +247,13 @@ unpack =
         i
 """
                         ]
-        , asPatternTests
+        , asPatternSuite
         , cannotDestructureInArgSuite
         ]
 
 
-asPatternTests : Test
-asPatternTests =
+asPatternSuite : Test
+asPatternSuite =
     describe "as pattern"
         [ test "does not use as when name is used but does not refer to binding" <|
             \() ->
@@ -827,10 +831,10 @@ unpack { o } =
         ]
 
 
-destructureInExistingLetsTest : Test
-destructureInExistingLetsTest =
-    describe "in existing lets"
-        [ test "possible" <|
+fixInLetSuite : Test
+fixInLetSuite =
+    describe "fixes in lets"
+        [ test "simple case" <|
             \() ->
                 """module A exposing (..)
 
@@ -864,7 +868,180 @@ unpack o =
     i
 """
                         ]
-        , test "impossible due to reliance on scope" <|
+        , test "expression contains binding multiple times" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo =
+            bar
+    in
+    case o of
+        Opaque i -> i + i
+"""
+                    |> Review.Test.run (rule fixInLet)
+                    |> Review.Test.expectErrors
+                        [ error """case o of
+        Opaque i -> i + i""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo =
+            bar
+
+        (Opaque i) =
+            o
+    in
+    i + i
+"""
+                        ]
+        , test "in let declaration" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack =
+    let
+        f o =
+            let
+                foo =
+                    bar
+            in
+            case o of
+                Opaque i -> i
+    in
+    f
+"""
+                    |> Review.Test.run (rule fixInLet)
+                    |> Review.Test.expectErrors
+                        [ error """case o of
+                Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack =
+    let
+        f o =
+            let
+                foo =
+                    bar
+
+                (Opaque i) =
+                    o
+            in
+            i
+    in
+    f
+"""
+                        ]
+        , test "in lambda" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack =
+    \\o ->
+        let
+            foo =
+                bar
+        in
+        case o of
+            Opaque i -> i
+"""
+                    |> Review.Test.run (rule fixInLet)
+                    |> Review.Test.expectErrors
+                        [ error """case o of
+            Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack =
+    \\o ->
+        let
+            foo =
+                bar
+
+            (Opaque i) =
+                o
+        in
+        i
+"""
+                        ]
+        , test "in same let as case" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        unpacked =
+            case o of
+                Opaque i -> i
+    in
+    unpacked
+"""
+                    |> Review.Test.run (rule fixInLet)
+                    |> Review.Test.expectErrors
+                        [ error """case o of
+                Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        unpacked =
+            i
+
+        (Opaque i) =
+            o
+    in
+    unpacked
+"""
+                        ]
+        , noExistingLetSuite
+        ]
+
+
+noExistingLetSuite : Test
+noExistingLetSuite =
+    describe "no suitable let exists"
+        [ test "no block exists" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case o of
+        Opaque i -> i
+"""
+                    |> Review.Test.run
+                        (fixInLet
+                            |> ifNoLetExists fail
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case o of
+        Opaque i -> i"""
+                        ]
+        , test "due to reliance on scope" <|
             \() ->
                 """module A exposing (..)
 
@@ -890,10 +1067,17 @@ unpack o =
                         [ error """case a of
         Opaque i -> i"""
                         ]
-        , describe "no existing lets → destructureTheArgument"
-            [ test "possible" <|
-                \() ->
-                    """module A exposing (..)
+        , createNewLetSuite
+        , fallbackToArgSuite
+        ]
+
+
+createNewLetSuite : Test
+createNewLetSuite =
+    describe "creates new let"
+        [ test "simple" <|
+            \() ->
+                """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -902,17 +1086,97 @@ unpack o =
     case o of
         Opaque i -> i
 """
-                        |> Review.Test.run
-                            (fixInLet
-                                |> ifNoLetExists
-                                    (fixInArgumentInstead
-                                        |> andIfAsPatternRequired useAsPattern
-                                        |> andIfCannotDestructureAtArgument fail
-                                    )
-                                |> rule
-                            )
-                        |> Review.Test.expectErrors
-                            [ error """case o of
+                    |> Review.Test.run
+                        (fixInLet
+                            |> ifNoLetExists createNewLet
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case o of
+        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        (Opaque i) =
+            o
+    in
+    i
+"""
+                        ]
+        , test "complex scope" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo =
+            bar
+    in
+    (\\a ->
+    case a of
+        Opaque i -> i
+        ) o
+"""
+                    |> Review.Test.run
+                        (fixInLet
+                            |> ifNoLetExists createNewLet
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case a of
+        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo =
+            bar
+    in
+    (\\a ->
+    let
+        (Opaque i) =
+            a
+    in
+    i
+        ) o
+"""
+                        ]
+        ]
+
+
+fallbackToArgSuite : Test
+fallbackToArgSuite =
+    describe "fallback to using argument"
+        [ test "simple" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case o of
+        Opaque i -> i
+"""
+                    |> Review.Test.run
+                        (fixInLet
+                            |> ifNoLetExists
+                                (fixInArgumentInstead
+                                    |> andIfAsPatternRequired fail
+                                    |> andIfCannotDestructureAtArgument fail
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case o of
         Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
@@ -921,8 +1185,52 @@ unpack : Opaque -> Int
 unpack (Opaque i) =
     i
 """
-                            ]
-            , test "argument also used elsewhere, destructured using as" <|
+                        ]
+        , test "complex scope" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo =
+            bar
+    in
+    (\\a ->
+    case a of
+        Opaque i -> i
+        ) o
+"""
+                    |> Review.Test.run
+                        (fixInLet
+                            |> ifNoLetExists
+                                (fixInArgumentInstead
+                                    |> andIfAsPatternRequired fail
+                                    |> andIfCannotDestructureAtArgument fail
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case a of
+        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo =
+            bar
+    in
+    (\\(Opaque i) ->
+    i
+        ) o
+"""
+                        ]
+        , describe "if as required"
+            [ test "uses as" <|
                 \() ->
                     """module A exposing (..)
 
@@ -953,31 +1261,68 @@ unpack ((Opaque i) as o) =
     ( o, i )
 """
                             ]
-            , test "the argument is a record field pattern, no fix" <|
+            , test "fails" <|
                 \() ->
                     """module A exposing (..)
 
 type Opaque = Opaque Int
 
-unpack : { o : Opaque } -> Int
-unpack { o } =
+unpack : Opaque -> Int
+unpack o =
     case o of
-        Opaque i -> i
+        Opaque i -> ( o, i )
 """
                         |> Review.Test.run
                             (fixInLet
                                 |> ifNoLetExists
                                     (fixInArgumentInstead
-                                        |> andIfAsPatternRequired useAsPattern
+                                        |> andIfAsPatternRequired fail
                                         |> andIfCannotDestructureAtArgument fail
                                     )
                                 |> rule
                             )
                         |> Review.Test.expectErrors
                             [ error """case o of
-        Opaque i -> i"""
+        Opaque i -> ( o, i )"""
                             ]
-            , test "between case and of is not just an argument, no fix" <|
+            , test "creates new let" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case o of
+        Opaque i -> ( o, i )
+"""
+                        |> Review.Test.run
+                            (fixInLet
+                                |> ifNoLetExists
+                                    (fixInArgumentInstead
+                                        |> andIfAsPatternRequired createNewLet
+                                        |> andIfCannotDestructureAtArgument fail
+                                    )
+                                |> rule
+                            )
+                        |> Review.Test.expectErrors
+                            [ error """case o of
+        Opaque i -> ( o, i )""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        (Opaque i) =
+            o
+    in
+    ( o, i )
+"""
+                            ]
+            ]
+        , describe "if not destructurable"
+            [ test "because case expression isn't just a variable" <|
                 \() ->
                     """module A exposing (..)
 
@@ -992,7 +1337,7 @@ unpack o =
                             (fixInLet
                                 |> ifNoLetExists
                                     (fixInArgumentInstead
-                                        |> andIfAsPatternRequired useAsPattern
+                                        |> andIfAsPatternRequired createNewLet
                                         |> andIfCannotDestructureAtArgument fail
                                     )
                                 |> rule
@@ -1001,10 +1346,87 @@ unpack o =
                             [ error """case ( o, o ) of
         ( Opaque i, Opaque ii ) -> i"""
                             ]
-            ]
-        , test "because a var pattern outside has the same name as in the case pattern → name clash" <|
-            \() ->
-                """module A exposing (..)
+            , test "because case expression is variable out of scope" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
+
+topLevel : Opaque
+topLevel =
+    Opaque 2
+
+unpacked : Int
+unpacked =
+    case topLevel of
+        Opaque i -> i
+"""
+                        |> Review.Test.run
+                            (fixInLet
+                                |> ifNoLetExists
+                                    (fixInArgumentInstead
+                                        |> andIfAsPatternRequired createNewLet
+                                        |> andIfCannotDestructureAtArgument fail
+                                    )
+                                |> rule
+                            )
+                        |> Review.Test.expectErrors
+                            [ error """case topLevel of
+        Opaque i -> i"""
+                            ]
+            , test "because the variable in case expression is from a pattern after as" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack ((Opaque ii) as o) =
+    case o of
+        Opaque i -> i
+"""
+                        |> Review.Test.run
+                            (fixInLet
+                                |> ifNoLetExists
+                                    (fixInArgumentInstead
+                                        |> andIfAsPatternRequired createNewLet
+                                        |> andIfCannotDestructureAtArgument fail
+                                    )
+                                |> rule
+                            )
+                        |> Review.Test.expectErrors
+                            [ error """case o of
+        Opaque i -> i"""
+                            ]
+            , test "because the variable in case expression is from a record field pattern" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : { o : Opaque } -> Int
+unpack { o } =
+    case o of
+        Opaque i -> i
+"""
+                        |> Review.Test.run
+                            (fixInLet
+                                |> ifNoLetExists
+                                    (fixInArgumentInstead
+                                        |> andIfAsPatternRequired createNewLet
+                                        |> andIfCannotDestructureAtArgument fail
+                                    )
+                                |> rule
+                            )
+                        |> Review.Test.expectErrors
+                            [ error """case o of
+        Opaque i -> i"""
+                            ]
+            , test "because a var in increased scope would cause a name clash" <|
+                \() ->
+                    """module A exposing (..)
+
+type Opaque = Opaque Int
 
 unpack : Opaque -> Int
 unpack o =
@@ -1015,15 +1437,58 @@ unpack o =
     case o of
         Opaque i -> i
 """
-                    |> Review.Test.run
-                        (fixInLet
-                            |> ifNoLetExists fail
-                            |> rule
-                        )
-                    |> Review.Test.expectErrors
-                        [ error """case o of
+                        |> Review.Test.run
+                            (fixInLet
+                                |> ifNoLetExists
+                                    (fixInArgumentInstead
+                                        |> andIfAsPatternRequired createNewLet
+                                        |> andIfCannotDestructureAtArgument fail
+                                    )
+                                |> rule
+                            )
+                        |> Review.Test.expectErrors
+                            [ error """case o of
         Opaque i -> i"""
-                        ]
+                            ]
+            , describe "fallback"
+                [ test "createNewLet" <|
+                    \() ->
+                        """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : { o : Opaque } -> Int
+unpack { o } =
+    case o of
+        Opaque i -> i
+"""
+                            |> Review.Test.run
+                                (fixInLet
+                                    |> ifNoLetExists
+                                        (fixInArgumentInstead
+                                            |> andIfAsPatternRequired fail
+                                            |> andIfCannotDestructureAtArgument createNewLet
+                                        )
+                                    |> rule
+                                )
+                            |> Review.Test.expectErrors
+                                [ error """case o of
+        Opaque i -> i"""
+                                    |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : { o : Opaque } -> Int
+unpack { o } =
+    let
+        (Opaque i) =
+            o
+    in
+    i
+"""
+                                ]
+                ]
+            ]
         ]
 
 

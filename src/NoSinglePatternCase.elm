@@ -980,16 +980,29 @@ moveCasePatternToLetBlock ( caseExpr, caseRange ) ( replacePattern, replaceExpre
 
             else
                 mapSubexpressions (go >> Node emptyRange) <| Node.value e
+
+        goDeclarations : Node LetDeclaration -> LetDeclaration
+        goDeclarations n =
+            case Node.value n of
+                LetFunction ({ declaration } as d) ->
+                    LetFunction
+                        { d
+                            | declaration =
+                                Node.map (\r -> { r | expression = Node emptyRange <| go r.expression }) declaration
+                        }
+
+                LetDestructuring p e ->
+                    LetDestructuring p <| Node emptyRange <| go e
     in
     go expression
         |> letExpr
-            (List.map Node.value declarations
+            (List.map goDeclarations declarations
                 ++ [ letDestructuring
                         (addParensToNamedPattern <| Node.value replacePattern)
                         caseExpr
                    ]
             )
-        |> prettyExpressionReplacing caseRange
+        |> prettyExpressionReplacing letRange
         |> Fix.replaceRangeBy letRange
 
 
