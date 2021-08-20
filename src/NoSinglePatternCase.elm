@@ -808,13 +808,25 @@ type alias SinglePatternCaseInfo =
 
 {-| An error for when a case expression only contains one case pattern. See [`Config`](NoSinglePatternCase#Config) for how fixes will be generated.
 -}
-singlePatternCaseError : Config separateLetUsed -> SinglePatternCaseInfo -> Error {}
-singlePatternCaseError (Config fixKind onlySeparateLetFixLeft) information =
+singlePatternCaseError : Config fixBy -> SinglePatternCaseInfo -> Error {}
+singlePatternCaseError config info =
     let
         errorInfo =
             { message = "Single pattern case block."
             , details = [ "Single pattern case blocks typically are either unnecessary or overly verbose.  There's usually a more concise way to destructure, e.g. in a function argument, so consider refactoring." ]
             }
+    in
+    (-- Check for useless cases.  This is also caught by `elm-review-simplify`,
+     -- but we'll handle it in case they don't have that in their review config.
+     -- Just use unit as "scope" here since all we care about is if any bindings are made
+     if List.isEmpty <| allBindingsInPattern UnitExpr info.singleCasePattern then
+        [ replaceCaseBlockWithExpression info.caseRange info.singleCaseExpression ]
+
+     else
+        makeFix config info
+    )
+        |> Rule.errorWithFix errorInfo info.caseRange
+
 
         { context, expressionInCaseOf, singleCaseExpression, caseRange, singleCasePattern } =
             information
