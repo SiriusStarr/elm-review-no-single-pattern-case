@@ -24,9 +24,9 @@ import Set exposing (Set)
 
 {-| Get all immediate child expressions of an expression.
 -}
-subexpressions : Expression -> List (Node Expression)
+subexpressions : Node Expression -> List (Node Expression)
 subexpressions e =
-    case e of
+    case Node.value e of
         LetExpression letBlock ->
             let
                 subExprs : Node LetDeclaration -> Node Expression
@@ -231,9 +231,9 @@ mapSubexpressions f e =
 
 {-| Get a set of all (unqualified) bindings used in an expression.
 -}
-allBindingsUsedInExpression : Expression -> Set String
+allBindingsUsedInExpression : Node Expression -> Set String
 allBindingsUsedInExpression expr =
-    case expr of
+    case Node.value expr of
         -- If the name is qualified, it isn't a variable
         FunctionOrValue [] n ->
             Set.singleton n
@@ -241,13 +241,13 @@ allBindingsUsedInExpression expr =
         _ ->
             subexpressions expr
                 -- Map and accumulate in one pass
-                |> List.foldl (\e -> Set.union (allBindingsUsedInExpression <| Node.value e)) Set.empty
+                |> List.foldl (\e -> Set.union (allBindingsUsedInExpression <| e)) Set.empty
 
 
 {-| Recursively find all bindings in a pattern and save whether or not
 destructuring could occur at the pattern.
 -}
-allBindingsInPattern : Expression -> Node Pattern -> List ( String, Binding )
+allBindingsInPattern : Node Expression -> Node Pattern -> List ( String, Binding )
 allBindingsInPattern scope pattern =
     let
         go : List (Node Pattern) -> List ( String, Binding )
@@ -318,9 +318,9 @@ allBindingsInPattern scope pattern =
 
 {-| Count the uses of a given name in the scope of an expression.
 -}
-countUsesIn : Expression -> String -> number_
+countUsesIn : Node Expression -> String -> number_
 countUsesIn expr name =
-    case expr of
+    case Node.value expr of
         -- If the name is qualified, it isn't a variable
         FunctionOrValue [] n ->
             if n == name then
@@ -332,13 +332,13 @@ countUsesIn expr name =
         _ ->
             subexpressions expr
                 -- Count and sum in one pass
-                |> List.foldl (\e -> (+) (countUsesIn (Node.value e) name)) 0
+                |> List.foldl (\e -> (+) (countUsesIn e name)) 0
 
 
 {-| Given a name, an inner expression, and an outer expression, report if the
 name is used in the outer expression exclusive of the inner expression.
 -}
-nameUsedOutsideExpr : String -> Expression -> Expression -> Bool
+nameUsedOutsideExpr : String -> Node Expression -> Node Expression -> Bool
 nameUsedOutsideExpr name inner outer =
     countUsesIn outer name > countUsesIn inner name
 
@@ -353,7 +353,7 @@ nameUsedOutsideExpr name inner outer =
 type alias Binding =
     { patternNodeRange : Range
     , canDestructureAt : Bool
-    , scope : Expression
+    , scope : Node Expression
     }
 
 
