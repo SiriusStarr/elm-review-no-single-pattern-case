@@ -45,7 +45,7 @@ sake of annotation, should it be necessary.
 -}
 
 import Dict exposing (Dict)
-import Elm.CodeGen exposing (asPattern, letDestructuring, letExpr)
+import Elm.CodeGen exposing (letDestructuring, letExpr)
 import Elm.Syntax.Declaration exposing (Declaration(..))
 import Elm.Syntax.Expression exposing (Expression(..), LetBlock, LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node(..))
@@ -66,7 +66,6 @@ import Util
         , mapSubexpressions
         , nameUsedOutsideExpr
         , prettyExpressionReplacing
-        , prettyPrintPattern
         , subexpressions
         )
 
@@ -941,16 +940,11 @@ fixes destructuring in the binding. This function does not check if this is
 possible, and should only be called after `getValidPatternBinding`.
 -}
 moveCasePatternToBinding : SinglePatternCaseInfo -> Binding -> Maybe String -> List Fix
-moveCasePatternToBinding ({ singleCasePattern } as info) { patternNodeRange } asName =
-    (case asName of
-        Just n ->
-            asPattern (Node.value singleCasePattern) n
-
-        Nothing ->
-            Node.value singleCasePattern
-    )
-        |> addParensToNamedPattern
-        |> prettyPrintPattern 120
+moveCasePatternToBinding ({ context, singleCasePattern } as info) { patternNodeRange } asName =
+    Node.range singleCasePattern
+        |> context.extractSourceCode
+        |> (\p -> MaybeX.unwrap p (\n -> String.concat [ "(", p, ") as ", n ]) asName)
+        |> (\p -> "(" ++ p ++ ")")
         |> Fix.replaceRangeBy patternNodeRange
         |> (\f -> [ f, replaceCaseBlockWithExpression info ])
 

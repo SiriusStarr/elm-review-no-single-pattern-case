@@ -9,12 +9,11 @@ module Util exposing
     , mapSubexpressions
     , nameUsedOutsideExpr
     , prettyExpressionReplacing
-    , prettyPrintPattern
     , subexpressions
     )
 
 import Elm.CodeGen exposing (parensPattern, val)
-import Elm.Pretty exposing (prettyExpression, prettyPattern)
+import Elm.Pretty exposing (prettyExpression)
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern(..))
@@ -381,32 +380,6 @@ addParensToNamedPattern p =
 
         _ ->
             p
-
-
-{-| If you call `Elm.Pretty.prettyPattern` on `ParenthesizedPattern inner`,
-`inner` is the result. This method displays the actual `(inner)` instead, as
-well as putting parentheses around `as` patterns.
--}
-prettyPrintPattern : Int -> Pattern -> String
-prettyPrintPattern width pattern =
-    let
-        printedPattern : String
-        printedPattern =
-            pattern |> prettyPattern |> pretty width
-
-        inParens : String
-        inParens =
-            "(" ++ printedPattern ++ ")"
-    in
-    case pattern of
-        ParenthesizedPattern _ ->
-            inParens
-
-        AsPattern _ _ ->
-            inParens
-
-        _ ->
-            printedPattern
 
 
 {-| Replace a range with a provided expression, pretty-printing and indenting
