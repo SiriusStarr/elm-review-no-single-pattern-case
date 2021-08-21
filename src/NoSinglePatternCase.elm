@@ -1,7 +1,7 @@
 module NoSinglePatternCase exposing
     ( rule
     , Config, fixInArgument, fixInLet
-    , ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
+    , replaceUnusedBindings, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
     , fail, createNewLet, useAsPattern, fixInArgumentInstead, andIfAsPatternRequired, andIfCannotDestructureAtArgument, fixInLetInstead, andIfNoLetExists
     , FixInArgument, FixInLet, UseArgInstead, UseLetInstead, CreateNewLet, Fail, UseAsPattern, UseAsPatternOrFailOr, CreateNewLetOr, UseArgOrCreateNewLetOrFail, UseLetOr, UseLetOrFail, UseAsPatternOrLetsOrFail, Either
     )
@@ -21,7 +21,7 @@ module NoSinglePatternCase exposing
 
 ## Customizing Config Behavior
 
-@docs ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
+@docs replaceUnusedBindings, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
 
 
 ## Config Behavior Options
@@ -45,6 +45,7 @@ sake of annotation, should it be necessary.
 -}
 
 import Dict exposing (Dict)
+import Dict.Extra as DictX
 import Elm.Syntax.Declaration exposing (Declaration(..))
 import Elm.Syntax.Expression exposing (Expression(..), LetBlock, LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
@@ -172,9 +173,14 @@ The default `Config`s [`fixInArgument`](#fixInArgument) and
 [`fixInLet`](#fixInLet) should be used as reasonable defaults, with more
 customization detailed in those sections.
 
+The behavior of the rule in the context of useless single pattern cases can also
+be configured via [`replaceUnusedBindings`](#replaceUnusedBindings). A single
+pattern case is considered to be useless if its pattern does not bind any name
+that is actually used in the expression.
+
 -}
 type Config fixBy
-    = Config { fixBy : FixBy }
+    = Config { fixBy : FixBy, replaceUseless : Bool }
 
 
 {-| Phantom type for `Config fixBy`.
@@ -243,6 +249,7 @@ fixInArgument =
                 { ifAsPatternNeeded = useAsPattern
                 , ifCannotDestructure = fail
                 }
+        , replaceUseless = False
         }
 
 
@@ -323,9 +330,49 @@ clash with the `i` in `foo`.
 fixInLet : Config FixInLet
 fixInLet =
     Config
-        { fixBy =
-            DestructureInLet { ifNoLetBlock = createNewLet }
+        { fixBy = DestructureInLet { ifNoLetBlock = createNewLet }
+        , replaceUseless = False
         }
+
+
+{-| A single pattern case is considered to be useless if its pattern does not
+bind any name that is actually used in the expression, e.g.
+
+    case x of
+        _ ->
+            True
+
+    case x of
+        () ->
+            True
+
+    case x of
+        A ({ field1, field2 } as record) ->
+            List.map foo bar
+                |> List.sum
+                |> baz
+
+The rule will always provide fixes for such cases but by default will not
+replace the binding used in the `case...of` expression. This option configures
+the rule to replace such bindings where possible. Fox example:
+
+    f unusedArg =
+        case unusedArg of
+            _ ->
+                True
+
+will be fixed to
+
+    f _ =
+        True
+
+This provides a more clear indication that the binding is unused. The binding
+will of course **not** be replaced if it used anywhere but in `case...of`.
+
+-}
+replaceUnusedBindings : Config fixBy -> Config fixBy
+replaceUnusedBindings (Config r) =
+    Config { r | replaceUseless = True }
 
 
 {-| Specify what to do if an `as` pattern would be required to destructure in
@@ -850,14 +897,20 @@ type alias SinglePatternCaseInfo =
 {-| An error for when a case expression only contains one case pattern. See [`Config`](NoSinglePatternCase#Config) for how fixes will be generated.
 -}
 singlePatternCaseError : Config fixBy -> SinglePatternCaseInfo -> Error {}
-singlePatternCaseError config info =
+singlePatternCaseError ((Config { replaceUseless }) as config) info =
     (-- Check for useless cases.  This is also caught by `elm-review-simplify`,
      -- but we'll handle it in case they don't have that in their review config.
      if
         allBindingsInPattern info.singleCaseExpression info.singleCasePattern
             |> List.all ((==) 0 << countUsesIn info.singleCaseExpression << Tuple.first)
      then
-        [ replaceCaseBlockWithExpression info ]
+        replaceCaseBlockWithExpression info
+            :: (if replaceUseless then
+                    fixUselessBindings info
+
+                else
+                    []
+               )
 
      else
         makeFix config info
@@ -942,6 +995,25 @@ moveCasePatternToBinding ({ context, singleCasePattern } as info) { patternNodeR
         |> (\p -> "(" ++ p ++ ")")
         |> Fix.replaceRangeBy patternNodeRange
         |> (\f -> [ f, replaceCaseBlockWithExpression info ])
+
+
+{-| Remove all bindings that are in the `case...of` expression that are not used
+elsewhere else.
+-}
+fixUselessBindings : SinglePatternCaseInfo -> List Fix
+fixUselessBindings { expressionInCaseOf, context } =
+    allBindingsUsedInExpression expressionInCaseOf
+        |> (\bs -> DictX.keepOnly bs context.bindings)
+        |> Dict.filter
+            (\name { canDestructureAt, scope } ->
+                canDestructureAt
+                    && not (nameUsedOutsideExpr name expressionInCaseOf scope)
+            )
+        |> Dict.values
+        |> List.map
+            (\{ patternNodeRange } ->
+                Fix.replaceRangeBy patternNodeRange "_"
+            )
 
 
 {-| Given context, an expression in a `case...of`, and a single case pattern and

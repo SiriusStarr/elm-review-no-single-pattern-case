@@ -14,6 +14,7 @@ import NoSinglePatternCase
         , ifAsPatternRequired
         , ifCannotDestructureAtArgument
         , ifNoLetExists
+        , replaceUnusedBindings
         , rule
         , useAsPattern
         )
@@ -136,6 +137,225 @@ type A = A Int
 
 pointless : A -> Bool
 pointless a =
+    True
+"""
+                        ]
+        , replaceUnusedSuite
+        ]
+
+
+replaceUnusedSuite : Test
+replaceUnusedSuite =
+    describe "replace unused bindings"
+        [ test "wildcard" <|
+            \() ->
+                """module A exposing (..)
+
+always2 : a -> Int
+always2 a =
+    case a of
+        _ -> 2
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case a of
+        _ -> 2""" |> Review.Test.whenFixed """module A exposing (..)
+
+always2 : a -> Int
+always2 _ =
+    2
+"""
+                        ]
+        , test "unit" <|
+            \() ->
+                """module A exposing (..)
+
+pointless : () -> Bool
+pointless unit =
+    case unit of
+        () -> True
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case unit of
+        () -> True""" |> Review.Test.whenFixed """module A exposing (..)
+
+pointless : () -> Bool
+pointless _ =
+    True
+"""
+                        ]
+        , test "complex pattern" <|
+            \() ->
+                """module A exposing (..)
+
+pointless : { n : a } -> Bool
+pointless record =
+    case record of
+        ({ n } as r) -> True
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case record of
+        ({ n } as r) -> True""" |> Review.Test.whenFixed """module A exposing (..)
+
+pointless : { n : a } -> Bool
+pointless _ =
+    True
+"""
+                        ]
+        , test "single custom type" <|
+            \() ->
+                """module A exposing (..)
+
+type A = A Int
+
+pointless : A -> Bool
+pointless a =
+    case a of
+        A int -> True
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case a of
+        A int -> True""" |> Review.Test.whenFixed """module A exposing (..)
+
+type A = A Int
+
+pointless : A -> Bool
+pointless _ =
+    True
+"""
+                        ]
+        , test "nested custom types" <|
+            \() ->
+                """module A exposing (..)
+
+type A = A Int
+
+type B = B A A
+
+pointless : B -> Bool
+pointless b =
+    case b of
+        B (A i1) (A i2) -> True
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case b of
+        B (A i1) (A i2) -> True""" |> Review.Test.whenFixed """module A exposing (..)
+
+type A = A Int
+
+type B = B A A
+
+pointless : B -> Bool
+pointless _ =
+    True
+"""
+                        ]
+        , test "record field cannot be fixed" <|
+            \() ->
+                """module A exposing (..)
+
+pointless : {a : Int, b : Int} -> Bool
+pointless {a, b} =
+    case (a, b) of
+        (_, _) -> True
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case (a, b) of
+        (_, _) -> True""" |> Review.Test.whenFixed """module A exposing (..)
+
+pointless : {a : Int, b : Int} -> Bool
+pointless {a, b} =
+    True
+"""
+                        ]
+        , test "let declaration" <|
+            \() ->
+                """module A exposing (..)
+
+type A = A Int
+
+pointless : A -> Bool
+pointless a =
+    let
+        b = a
+    in
+    case b of
+        A int -> True
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case b of
+        A int -> True""" |> Review.Test.whenFixed """module A exposing (..)
+
+type A = A Int
+
+pointless : A -> Bool
+pointless a =
+    let
+        _ = a
+    in
+    True
+"""
+                        ]
+        , test "multiple bindings" <|
+            \() ->
+                """module A exposing (..)
+
+pointless : Int -> Int -> Int -> Bool
+pointless a b c =
+    let
+        foo = b
+    in
+    case (a, b, c) of
+        (_, _, _) -> True
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error """case (a, b, c) of
+        (_, _, _) -> True""" |> Review.Test.whenFixed """module A exposing (..)
+
+pointless : Int -> Int -> Int -> Bool
+pointless _ b _ =
+    let
+        foo = b
+    in
     True
 """
                         ]
