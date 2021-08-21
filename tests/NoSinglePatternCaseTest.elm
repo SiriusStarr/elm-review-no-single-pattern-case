@@ -255,7 +255,7 @@ unpack =
 asPatternSuite : Test
 asPatternSuite =
     describe "as pattern"
-        [ test "does not use as when name is used but does not refer to binding" <|
+        [ test "does not use as when name is used but does not refer to binding and is multiline expression" <|
             \() ->
                 """module A exposing (..)
 
@@ -264,19 +264,27 @@ type Opaque = Opaque Int
 withUnpacked : Opaque -> ( Int, List Int )
 withUnpacked map =
     case map of
-        Opaque i -> ( i, List.map ((+) 1) [ 1 ] )
+        Opaque i ->
+            ( i
+            , List.map ((+) 1) [ 1 ]
+            )
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
                         [ error """case map of
-        Opaque i -> ( i, List.map ((+) 1) [ 1 ] )"""
+        Opaque i ->
+            ( i
+            , List.map ((+) 1) [ 1 ]
+            )"""
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
 withUnpacked : Opaque -> ( Int, List Int )
 withUnpacked (Opaque i) =
-    ( i, List.map ((+) 1) [ 1 ] )
+    ( i
+            , List.map ((+) 1) [ 1 ]
+            )
 """
                         ]
         , test "does not use as when name is used outside of scope" <|
@@ -868,6 +876,55 @@ unpack o =
     i
 """
                         ]
+        , test "multiline expressions" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+withUnpacked : Opaque -> ( Int, List Int )
+withUnpacked map =
+    let
+        foo =
+            bar
+    in
+    case
+        foo
+            (always map)
+    of
+        Opaque i ->
+            ( i
+            , List.map ((+) 1) [ 1 ]
+            )
+"""
+                    |> Review.Test.run (rule fixInLet)
+                    |> Review.Test.expectErrors
+                        [ error """case
+        foo
+            (always map)
+    of
+        Opaque i ->
+            ( i
+            , List.map ((+) 1) [ 1 ]
+            )""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+withUnpacked : Opaque -> ( Int, List Int )
+withUnpacked map =
+    let
+        foo =
+            bar
+
+        (Opaque i) =
+            foo
+                   (always map)
+    in
+    ( i
+            , List.map ((+) 1) [ 1 ]
+            )
+"""
+                        ]
         , test "expression contains binding multiple times" <|
             \() ->
                 """module A exposing (..)
@@ -916,15 +973,21 @@ unpack =
                 foo =
                     bar
             in
-            case o of
+            case foo
+                |> o
+            of
                 Opaque i -> i
+                    + i
     in
     f
 """
                     |> Review.Test.run (rule fixInLet)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-                Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error """case foo
+                |> o
+            of
+                Opaque i -> i
+                    + i""" |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -937,9 +1000,11 @@ unpack =
                     bar
 
                 (Opaque i) =
-                    o
+                    foo
+                       |> o
             in
             i
+                    + i
     in
     f
 """
@@ -1104,6 +1169,48 @@ unpack o =
             o
     in
     i
+"""
+                        ]
+        , test "multiline expressions" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+withUnpacked : Opaque -> ( Int, List Int )
+withUnpacked map =
+    case
+        foo
+            (always map)
+    of
+        Opaque i ->
+            ( i
+            , List.map ((+) 1) [ 1 ]
+            )
+"""
+                    |> Review.Test.run (rule fixInLet)
+                    |> Review.Test.expectErrors
+                        [ error """case
+        foo
+            (always map)
+    of
+        Opaque i ->
+            ( i
+            , List.map ((+) 1) [ 1 ]
+            )""" |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+withUnpacked : Opaque -> ( Int, List Int )
+withUnpacked map =
+    let
+        (Opaque i) =
+            foo
+                   (always map)
+    in
+    ( i
+                , List.map ((+) 1) [ 1 ]
+                )
 """
                         ]
         , test "complex scope" <|

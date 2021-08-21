@@ -45,12 +45,11 @@ sake of annotation, should it be necessary.
 -}
 
 import Dict exposing (Dict)
-import Elm.CodeGen exposing (letDestructuring, letExpr)
 import Elm.Syntax.Declaration exposing (Declaration(..))
 import Elm.Syntax.Expression exposing (Expression(..), LetBlock, LetDeclaration(..))
-import Elm.Syntax.Node as Node exposing (Node(..))
+import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern)
-import Elm.Syntax.Range exposing (Range, emptyRange)
+import Elm.Syntax.Range as Range exposing (Range)
 import Maybe.Extra as MaybeX
 import Review.Fix as Fix exposing (Fix)
 import Review.Rule as Rule exposing (Error, Rule)
@@ -58,14 +57,12 @@ import Set exposing (Set)
 import Util
     exposing
         ( Binding
-        , addParensToNamedPattern
         , allBindingsInPattern
         , allBindingsUsedInExpression
         , countUsesIn
         , either
-        , mapSubexpressions
         , nameUsedOutsideExpr
-        , prettyExpressionReplacing
+        , reindent
         , subexpressions
         )
 
@@ -856,7 +853,6 @@ singlePatternCaseError : Config fixBy -> SinglePatternCaseInfo -> Error {}
 singlePatternCaseError config info =
     (-- Check for useless cases.  This is also caught by `elm-review-simplify`,
      -- but we'll handle it in case they don't have that in their review config.
-     -- Just use unit as "scope" here since all we care about is if any bindings are made
      if
         allBindingsInPattern info.singleCaseExpression info.singleCasePattern
             |> List.all ((==) 0 << countUsesIn info.singleCaseExpression << Tuple.first)
@@ -878,13 +874,13 @@ singlePatternCaseError config info =
 the config or fail.
 -}
 makeFix : Config fixBy -> SinglePatternCaseInfo -> Maybe (List Fix)
-makeFix (Config { fixBy }) ({ context, expressionInCaseOf, singleCaseExpression, caseRange, singleCasePattern } as info) =
+makeFix (Config { fixBy }) ({ context, expressionInCaseOf, singleCaseExpression, singleCasePattern } as info) =
     let
         destructureInLet : (Either a b -> Maybe (List Fix)) -> Either (Either a b) Fail -> Maybe (List Fix)
         destructureInLet fallback ifNoLetBlock =
             case getValidLetBlock context expressionInCaseOf ( singleCasePattern, singleCaseExpression ) of
                 Just existingLetBlock ->
-                    [ moveCasePatternToLetBlock info existingLetBlock ]
+                    moveCasePatternToLetBlock info existingLetBlock
                         |> Just
 
                 Nothing ->
@@ -892,7 +888,7 @@ makeFix (Config { fixBy }) ({ context, expressionInCaseOf, singleCaseExpression,
 
         useNewLet : CreateNewLet -> Maybe (List Fix)
         useNewLet CreateNewLet =
-            Just <| fixInNewLet ( expressionInCaseOf, caseRange ) ( singleCasePattern, singleCaseExpression )
+            Just <| fixInNewLet info
 
         fallbackToArg : UseArgInstead -> Maybe (List Fix)
         fallbackToArg (UseArgInstead { ifAsPatternNeeded, ifCannotDestructure }) =
@@ -980,56 +976,51 @@ destructuring into the `let` block. This does **not** check that the `let` block
 is viable to be moved to and should only be used with a `let` block obtained
 from `getValidLetBlock`.
 -}
-moveCasePatternToLetBlock : SinglePatternCaseInfo -> ( LetBlock, Range ) -> Fix
-moveCasePatternToLetBlock { expressionInCaseOf, singleCasePattern, singleCaseExpression, caseRange } ( { declarations, expression }, letRange ) =
+moveCasePatternToLetBlock : SinglePatternCaseInfo -> LetBlock -> List Fix
+moveCasePatternToLetBlock ({ expressionInCaseOf, singleCasePattern, caseRange, context } as info) { declarations } =
     let
-        go : Node Expression -> Expression
-        go e =
-            if Node.range e == caseRange then
-                Node.value singleCaseExpression
+        oldDeclarationRange : Range
+        oldDeclarationRange =
+            List.map Node.range declarations
+                |> Range.combine
 
-            else
-                mapSubexpressions (go >> Node emptyRange) <| Node.value e
+        letIndentAmt : Int
+        letIndentAmt =
+            oldDeclarationRange.start.column - 1
 
-        goDeclarations : Node LetDeclaration -> LetDeclaration
-        goDeclarations n =
-            case Node.value n of
-                LetFunction ({ declaration } as d) ->
-                    LetFunction
-                        { d
-                            | declaration =
-                                Node.map (\r -> { r | expression = Node emptyRange <| go r.expression }) declaration
-                        }
+        newDeclaration : String
+        newDeclaration =
+            Node.range singleCasePattern
+                |> context.extractSourceCode
+                |> (\p -> String.concat [ "\n\n", String.repeat letIndentAmt " ", "(", p, ") =\n", String.repeat (letIndentAmt + 4) " ", expr ])
 
-                LetDestructuring p e ->
-                    LetDestructuring p <| Node emptyRange <| go e
+        expr : String
+        expr =
+            Node.range expressionInCaseOf
+                |> context.extractSourceCode
+                |> reindent (letIndentAmt + 5 - caseRange.start.column)
     in
-    go expression
-        |> letExpr
-            (List.map goDeclarations declarations
-                ++ [ letDestructuring
-                        (addParensToNamedPattern <| Node.value singleCasePattern)
-                        (Node.value expressionInCaseOf)
-                   ]
-            )
-        |> prettyExpressionReplacing letRange
-        |> Fix.replaceRangeBy letRange
+    Fix.insertAt oldDeclarationRange.end newDeclaration
+        |> (\f -> [ f, replaceCaseBlockWithExpression info ])
 
 
 {-| Given a case expression and a single case pattern and expression, convert
 the case into a `let` block destructured in.
 -}
-fixInNewLet : ( Node Expression, Range ) -> ( Node Pattern, Node Expression ) -> List Fix
-fixInNewLet ( expressionInCaseOf, caseRange ) ( singleCasePattern, singleCaseExpression ) =
-    [ Fix.replaceRangeBy caseRange
-        (letExpr
-            [ letDestructuring
-                (addParensToNamedPattern <| Node.value singleCasePattern)
-                (Node.value expressionInCaseOf)
-            ]
-            (Node.value singleCaseExpression)
-            |> prettyExpressionReplacing caseRange
-        )
+fixInNewLet : SinglePatternCaseInfo -> List Fix
+fixInNewLet { expressionInCaseOf, caseRange, singleCasePattern, singleCaseExpression, context } =
+    [ String.concat
+        [ "let\n    ("
+        , context.extractSourceCode (Node.range singleCasePattern)
+        , ") =\n"
+        , "        "
+        , context.extractSourceCode (Node.range expressionInCaseOf)
+            |> reindent 4
+        , "\nin\n"
+        , context.extractSourceCode (Node.range singleCaseExpression)
+        ]
+        |> reindent caseRange.start.column
+        |> Fix.replaceRangeBy caseRange
     ]
 
 
@@ -1053,7 +1044,7 @@ pattern and expression, get the closest `let` block to destructure in, if one
 exists. This requires all names in expression to be in scope in the `let` and
 checks for name clashes in the pattern to be moved.
 -}
-getValidLetBlock : LocalContext -> Node Expression -> ( Node Pattern, Node Expression ) -> Maybe ( LetBlock, Range )
+getValidLetBlock : LocalContext -> Node Expression -> ( Node Pattern, Node Expression ) -> Maybe LetBlock
 getValidLetBlock { newBindingsSinceLastLet, closestLetBlock } caseExpr ( singleCasePattern, singleCaseExpr ) =
     if
         allBindingsUsedInExpression caseExpr
@@ -1072,7 +1063,7 @@ getValidLetBlock { newBindingsSinceLastLet, closestLetBlock } caseExpr ( singleC
                         Nothing
 
                     else
-                        Just ( letBlock, Node.range expression )
+                        Just letBlock
                 )
 
     else

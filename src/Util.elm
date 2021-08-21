@@ -1,24 +1,19 @@
 module Util exposing
     ( Binding
     , Either(..)
-    , addParensToNamedPattern
     , allBindingsInPattern
     , allBindingsUsedInExpression
     , countUsesIn
     , either
-    , mapSubexpressions
     , nameUsedOutsideExpr
-    , prettyExpressionReplacing
+    , reindent
     , subexpressions
     )
 
-import Elm.CodeGen exposing (parensPattern, val)
-import Elm.Pretty exposing (prettyExpression)
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern(..))
 import Elm.Syntax.Range exposing (Range)
-import Pretty exposing (pretty)
 import Set exposing (Set)
 
 
@@ -52,7 +47,7 @@ subexpressions e =
             List.map (Tuple.second << Node.value) setters
 
         RecordUpdateExpression record updaters ->
-            Node.map val record
+            Node.map (FunctionOrValue []) record
                 :: List.map (Tuple.second << Node.value) updaters
 
         Application exprs ->
@@ -112,121 +107,6 @@ subexpressions e =
 
         PrefixOperator _ ->
             []
-
-
-{-| Map all immediate child expressions of an expression.
--}
-mapSubexpressions : (Node Expression -> Node Expression) -> Expression -> Expression
-mapSubexpressions f e =
-    case e of
-        LetExpression { declarations, expression } ->
-            let
-                mapSubexprs : LetDeclaration -> LetDeclaration
-                mapSubexprs d =
-                    case d of
-                        LetFunction fun ->
-                            LetFunction
-                                { fun
-                                    | declaration =
-                                        Node.map
-                                            (\impl ->
-                                                { impl
-                                                    | expression =
-                                                        f impl.expression
-                                                }
-                                            )
-                                            fun.declaration
-                                }
-
-                        LetDestructuring pattern expr ->
-                            LetDestructuring pattern (f expr)
-            in
-            LetExpression
-                { declarations =
-                    List.map
-                        (Node.map mapSubexprs)
-                        declarations
-                , expression =
-                    f expression
-                }
-
-        ListExpr exprs ->
-            ListExpr (List.map f exprs)
-
-        TupledExpression exprs ->
-            TupledExpression (List.map f exprs)
-
-        RecordExpr setters ->
-            RecordExpr (List.map (Node.map (Tuple.mapSecond f)) setters)
-
-        RecordUpdateExpression record updaters ->
-            List.map (Node.map (Tuple.mapSecond f)) updaters
-                |> RecordUpdateExpression record
-
-        Application exprs ->
-            Application (List.map f exprs)
-
-        CaseExpression { expression, cases } ->
-            CaseExpression
-                { expression = f expression
-                , cases = List.map (Tuple.mapSecond f) cases
-                }
-
-        OperatorApplication name dir e1 e2 ->
-            OperatorApplication name
-                dir
-                (f e1)
-                (f e2)
-
-        IfBlock predExpr thenExpr elseExpr ->
-            IfBlock (f predExpr)
-                (f thenExpr)
-                (f elseExpr)
-
-        LambdaExpression lambda ->
-            LambdaExpression { lambda | expression = f lambda.expression }
-
-        RecordAccess record fieldName ->
-            RecordAccess (f record) fieldName
-
-        ParenthesizedExpression expr ->
-            ParenthesizedExpression (f expr)
-
-        Negation expr ->
-            Negation (f expr)
-
-        UnitExpr ->
-            e
-
-        Integer _ ->
-            e
-
-        Hex _ ->
-            e
-
-        Floatable _ ->
-            e
-
-        Literal _ ->
-            e
-
-        CharLiteral _ ->
-            e
-
-        GLSLExpression _ ->
-            e
-
-        RecordAccessFunction _ ->
-            e
-
-        FunctionOrValue _ _ ->
-            e
-
-        Operator _ ->
-            e
-
-        PrefixOperator _ ->
-            e
 
 
 {-| Get a set of all (unqualified) bindings used in an expression.
@@ -355,41 +235,6 @@ type alias Binding =
     , canDestructureAt : Bool
     , scope : Node Expression
     }
-
-
-{-| Named patterns that occur in e.g. function arguments must be surrounded by
-parentheses, unlike in `case` patterns. This function wraps them accordingly,
-e.g. for:
-
-    f o =
-        case o of
-            Opaque i ->
-                i
-
-vs
-
-    f (Opaque i) =
-        i
-
--}
-addParensToNamedPattern : Pattern -> Pattern
-addParensToNamedPattern p =
-    case p of
-        NamedPattern _ _ ->
-            parensPattern p
-
-        _ ->
-            p
-
-
-{-| Replace a range with a provided expression, pretty-printing and indenting
-the result.
--}
-prettyExpressionReplacing : Range -> Expression -> String
-prettyExpressionReplacing replacedRange =
-    prettyExpression
-        >> pretty 120
-        >> reindent replacedRange.start.column
 
 
 {-| Re-indent a section of generated code to ensure that it doesn't cause issues
