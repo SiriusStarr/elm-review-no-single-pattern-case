@@ -17,7 +17,7 @@ import Review.Rule exposing (Rule)
 config : List Rule
 config =
     [ NoSinglePatternCase.rule
-        NoSinglePatternCase.alwaysFixInArgument
+        NoSinglePatternCase.fixInArgument
     ]
 ```
 
