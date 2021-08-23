@@ -831,47 +831,44 @@ checkExpression config ({ bindings } as context) expressionNode =
 
         LetExpression lB ->
             let
-                bindingsInDecl : Node LetDeclaration -> List ( String, Binding )
-                bindingsInDecl d =
-                    case Node.value d of
-                        LetDestructuring pattern _ ->
-                            allBindingsInPattern expressionNode pattern
-
-                        LetFunction fun ->
-                            let
-                                { name } =
-                                    Node.value fun.declaration
-                            in
-                            [ ( Node.value name
-                              , { patternNodeRange = Node.range name
-                                , canDestructureAt = fun.signature == Nothing
-                                , scope = expressionNode
-                                }
-                              )
-                            ]
-
-                letBindings : List ( String, Binding )
-                letBindings =
-                    List.concatMap bindingsInDecl lB.declarations
-
-                checkDecl : Node LetDeclaration -> List (Error {})
+                checkDecl : Node LetDeclaration -> ( List ( String, Binding ), List ( String, Binding ) -> List (Error {}) )
                 checkDecl d =
                     case Node.value d of
                         LetFunction fun ->
                             let
-                                { expression, arguments } =
+                                { name, expression, arguments } =
                                     Node.value fun.declaration
                             in
-                            List.concatMap (allBindingsInPattern expression) arguments
-                                |> (\bs ->
-                                        go (Just lB) (bs ++ letBindings) expression
+                            ( [ ( Node.value name
+                                , { patternNodeRange = Node.range name
+                                  , canDestructureAt = fun.signature == Nothing
+                                  , scope = expressionNode
+                                  }
+                                )
+                              ]
+                            , List.concatMap (allBindingsInPattern expression) arguments
+                                |> (\args bs ->
+                                        go (Just lB) (args ++ bs) expression
                                    )
+                            )
 
-                        LetDestructuring _ expr ->
-                            go (Just lB) letBindings expr
+                        LetDestructuring pattern expr ->
+                            ( allBindingsInPattern expressionNode pattern
+                            , \bs -> go (Just lB) bs expr
+                            )
+
+                ( letBindings, subexprs ) =
+                    -- Gather all new bindings and subexpressions to check in one pass
+                    List.foldl
+                        (\d ( bAcc, eAcc ) ->
+                            checkDecl d
+                                |> (\( bs, e ) -> ( bs ++ bAcc, e :: eAcc ))
+                        )
+                        ( [], [] )
+                        lB.declarations
             in
             go (Just lB) letBindings lB.expression
-                ++ List.concatMap checkDecl lB.declarations
+                ++ List.concatMap (\f -> f letBindings) subexprs
 
         LambdaExpression { args, expression } ->
             -- Add arg bindings
