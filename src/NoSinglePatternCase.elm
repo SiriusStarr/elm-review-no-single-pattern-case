@@ -811,13 +811,13 @@ checkExpression config ({ bindings } as context) expressionNode =
     case Node.value expressionNode of
         CaseExpression caseBlock ->
             case caseBlock.cases of
-                [ ( singleCasePattern, singleCaseExpression ) ] ->
+                [ ( singlePattern, singleExpression ) ] ->
                     [ singlePatternCaseError config
                         { context = context
-                        , expressionInCaseOf = caseBlock.expression
-                        , singleCasePattern = singleCasePattern
-                        , singleCaseExpression = singleCaseExpression
-                        , caseRange = Node.range expressionNode
+                        , caseExpression = caseBlock.expression
+                        , singlePattern = singlePattern
+                        , singleExpression = singleExpression
+                        , range = Node.range expressionNode
                         }
                     ]
 
@@ -885,24 +885,35 @@ checkExpression config ({ bindings } as context) expressionNode =
                 |> List.concatMap (go Nothing [])
 
 
-type alias SinglePatternCaseInfo =
+{-| Information about a detected single-pattern case.
+
+  - `context` -- The local context the expression exists in (bindings, closest
+    `let` block. etc.)
+  - `caseExpression` -- The expression between `case` and `of`, i.e. the
+    expression being pattern matched on.
+  - `singlePattern` -- The single pattern match.
+  - `singleExpression` -- The expression output by the single pattern.
+  - `range` -- The `Range` of the entire case expression.
+
+-}
+type alias SinglePatternCase =
     { context : LocalContext
-    , expressionInCaseOf : Node Expression
-    , singleCasePattern : Node Pattern
-    , singleCaseExpression : Node Expression
-    , caseRange : Range
+    , caseExpression : Node Expression
+    , singlePattern : Node Pattern
+    , singleExpression : Node Expression
+    , range : Range
     }
 
 
 {-| An error for when a case expression only contains one case pattern. See [`Config`](NoSinglePatternCase#Config) for how fixes will be generated.
 -}
-singlePatternCaseError : Config fixBy -> SinglePatternCaseInfo -> Error {}
+singlePatternCaseError : Config fixBy -> SinglePatternCase -> Error {}
 singlePatternCaseError ((Config { replaceUseless }) as config) info =
     (-- Check for useless cases.  This is also caught by `elm-review-simplify`,
      -- but we'll handle it in case they don't have that in their review config.
      if
-        allBindingsInPattern info.singleCaseExpression info.singleCasePattern
-            |> List.all ((==) 0 << countUsesIn info.singleCaseExpression << Tuple.first)
+        allBindingsInPattern info.singleExpression info.singlePattern
+            |> List.all ((==) 0 << countUsesIn info.singleExpression << Tuple.first)
      then
         replaceCaseBlockWithExpression info
             :: (if replaceUseless then
@@ -914,62 +925,60 @@ singlePatternCaseError ((Config { replaceUseless }) as config) info =
 
      else
         makeFix config info
-            |> Maybe.withDefault []
     )
         |> Rule.errorWithFix
             { message = "Single pattern case block."
             , details = [ "Single pattern case blocks typically are either unnecessary or overly verbose.  There's usually a more concise way to destructure, e.g. in a function argument, so consider refactoring." ]
             }
-            info.caseRange
+            info.range
 
 
 {-| Given config and info about a single pattern case, try to create a fix per
 the config or fail.
 -}
-makeFix : Config fixBy -> SinglePatternCaseInfo -> Maybe (List Fix)
-makeFix (Config { fixBy }) ({ context, expressionInCaseOf, singleCaseExpression, singleCasePattern } as info) =
+makeFix : Config fixBy -> SinglePatternCase -> List Fix
+makeFix (Config { fixBy }) ({ context, caseExpression, singleExpression, singlePattern } as info) =
     let
-        destructureInLet : (Either a b -> Maybe (List Fix)) -> Either (Either a b) Fail -> Maybe (List Fix)
+        destructureInLet : (Either a b -> List Fix) -> Either (Either a b) Fail -> List Fix
         destructureInLet fallback ifNoLetBlock =
-            case getValidLetBlock context expressionInCaseOf ( singleCasePattern, singleCaseExpression ) of
+            case getValidLetBlock context caseExpression ( singlePattern, singleExpression ) of
                 Just existingLetBlock ->
                     moveCasePatternToLetBlock info existingLetBlock
-                        |> Just
 
                 Nothing ->
                     either fallback orFail ifNoLetBlock
 
-        useNewLet : CreateNewLet -> Maybe (List Fix)
+        useNewLet : CreateNewLet -> List Fix
         useNewLet CreateNewLet =
-            Just <| fixInNewLet info
+            fixInNewLet info
 
-        fallbackToArg : UseArgInstead -> Maybe (List Fix)
+        fallbackToArg : UseArgInstead -> List Fix
         fallbackToArg (UseArgInstead { ifAsPatternNeeded, ifCannotDestructure }) =
             destructureInArg (always useNewLet) useNewLet ifAsPatternNeeded ifCannotDestructure
 
-        orFail : Fail -> Maybe (List Fix)
+        orFail : Fail -> List Fix
         orFail Fail =
-            Nothing
+            []
 
-        fallbackToLet : (a -> Maybe (List Fix)) -> (b -> Maybe (List Fix)) -> UseLetInstead (Either (Either a b) Fail) -> Maybe (List Fix)
+        fallbackToLet : (a -> List Fix) -> (b -> List Fix) -> UseLetInstead (Either (Either a b) Fail) -> List Fix
         fallbackToLet fA fB (UseLetInstead { ifNoLetBlock }) =
             destructureInLet (either fA fB) ifNoLetBlock
 
-        orUseAsPattern : ( String, Binding ) -> UseAsPattern -> Maybe (List Fix)
+        orUseAsPattern : ( String, Binding ) -> UseAsPattern -> List Fix
         orUseAsPattern ( name, binding ) UseAsPattern =
             moveCasePatternToBinding info binding (Just name)
-                |> Just
 
-        destructureInArg : (( String, Binding ) -> asFallback -> Maybe (List Fix)) -> (destructureFallback -> Maybe (List Fix)) -> Either (Either asFallback UseAsPattern) Fail -> Either (Either destructureFallback Fail) Fail -> Maybe (List Fix)
+        destructureInArg : (( String, Binding ) -> asFallback -> List Fix) -> (destructureFallback -> List Fix) -> Either (Either asFallback UseAsPattern) Fail -> Either (Either destructureFallback Fail) Fail -> List Fix
         destructureInArg asFallback destructureFallback ifAsPatternNeeded ifCannotDestructure =
-            case getValidPatternBinding context expressionInCaseOf ( singleCasePattern, singleCaseExpression ) of
+            case getValidPatternBinding context caseExpression ( singlePattern, singleExpression ) of
                 Just { name, binding, requiresAsPattern } ->
                     if requiresAsPattern then
-                        either (either (asFallback ( name, binding )) (orUseAsPattern ( name, binding ))) orFail ifAsPatternNeeded
+                        either (either (asFallback ( name, binding )) (orUseAsPattern ( name, binding )))
+                            orFail
+                            ifAsPatternNeeded
 
                     else
                         moveCasePatternToBinding info binding Nothing
-                            |> Just
 
                 Nothing ->
                     either (either destructureFallback orFail) orFail ifCannotDestructure
@@ -979,7 +988,10 @@ makeFix (Config { fixBy }) ({ context, expressionInCaseOf, singleCaseExpression,
             destructureInLet (either useNewLet fallbackToArg) ifNoLetBlock
 
         DestructureInArgument { ifAsPatternNeeded, ifCannotDestructure } ->
-            destructureInArg (\b -> fallbackToLet useNewLet (orUseAsPattern b)) (fallbackToLet useNewLet orFail) ifAsPatternNeeded ifCannotDestructure
+            destructureInArg (\b -> fallbackToLet useNewLet (orUseAsPattern b))
+                (fallbackToLet useNewLet orFail)
+                ifAsPatternNeeded
+                ifCannotDestructure
 
 
 {-| Given the full range of a `case` block, a binding to destructure at, maybe a
@@ -987,9 +999,9 @@ name for an `as` pattern, and a single case pattern and expression, generate
 fixes destructuring in the binding. This function does not check if this is
 possible, and should only be called after `getValidPatternBinding`.
 -}
-moveCasePatternToBinding : SinglePatternCaseInfo -> Binding -> Maybe String -> List Fix
-moveCasePatternToBinding ({ context, singleCasePattern } as info) { patternNodeRange } asName =
-    Node.range singleCasePattern
+moveCasePatternToBinding : SinglePatternCase -> Binding -> Maybe String -> List Fix
+moveCasePatternToBinding ({ context, singlePattern } as info) { patternNodeRange } asName =
+    Node.range singlePattern
         |> context.extractSourceCode
         |> (\p -> MaybeX.unwrap p (\n -> String.concat [ "(", p, ") as ", n ]) asName)
         |> (\p -> "(" ++ p ++ ")")
@@ -1000,14 +1012,14 @@ moveCasePatternToBinding ({ context, singleCasePattern } as info) { patternNodeR
 {-| Remove all bindings that are in the `case...of` expression that are not used
 elsewhere else.
 -}
-fixUselessBindings : SinglePatternCaseInfo -> List Fix
-fixUselessBindings { expressionInCaseOf, context } =
-    allBindingsUsedInExpression expressionInCaseOf
+fixUselessBindings : SinglePatternCase -> List Fix
+fixUselessBindings { caseExpression, context } =
+    allBindingsUsedInExpression caseExpression
         |> (\bs -> DictX.keepOnly bs context.bindings)
         |> Dict.filter
             (\name { canDestructureAt, scope } ->
                 canDestructureAt
-                    && not (nameUsedOutsideExpr name expressionInCaseOf scope)
+                    && not (nameUsedOutsideExpr name caseExpression scope)
             )
         |> Dict.values
         |> List.map
@@ -1048,8 +1060,8 @@ destructuring into the `let` block. This does **not** check that the `let` block
 is viable to be moved to and should only be used with a `let` block obtained
 from `getValidLetBlock`.
 -}
-moveCasePatternToLetBlock : SinglePatternCaseInfo -> LetBlock -> List Fix
-moveCasePatternToLetBlock ({ expressionInCaseOf, singleCasePattern, caseRange, context } as info) { declarations } =
+moveCasePatternToLetBlock : SinglePatternCase -> LetBlock -> List Fix
+moveCasePatternToLetBlock ({ caseExpression, singlePattern, range, context } as info) { declarations } =
     let
         oldDeclarationRange : Range
         oldDeclarationRange =
@@ -1062,15 +1074,25 @@ moveCasePatternToLetBlock ({ expressionInCaseOf, singleCasePattern, caseRange, c
 
         newDeclaration : String
         newDeclaration =
-            Node.range singleCasePattern
+            Node.range singlePattern
                 |> context.extractSourceCode
-                |> (\p -> String.concat [ "\n\n", String.repeat letIndentAmt " ", "(", p, ") =\n", String.repeat (letIndentAmt + 4) " ", expr ])
+                |> (\p ->
+                        String.concat
+                            [ "\n\n"
+                            , String.repeat letIndentAmt " "
+                            , "("
+                            , p
+                            , ") =\n"
+                            , String.repeat (letIndentAmt + 4) " "
+                            , expr
+                            ]
+                   )
 
         expr : String
         expr =
-            Node.range expressionInCaseOf
+            Node.range caseExpression
                 |> context.extractSourceCode
-                |> reindent (letIndentAmt + 5 - caseRange.start.column)
+                |> reindent (letIndentAmt + 5 - range.start.column)
     in
     Fix.insertAt oldDeclarationRange.end newDeclaration
         |> (\f -> [ f, replaceCaseBlockWithExpression info ])
@@ -1079,20 +1101,20 @@ moveCasePatternToLetBlock ({ expressionInCaseOf, singleCasePattern, caseRange, c
 {-| Given a case expression and a single case pattern and expression, convert
 the case into a `let` block destructured in.
 -}
-fixInNewLet : SinglePatternCaseInfo -> List Fix
-fixInNewLet { expressionInCaseOf, caseRange, singleCasePattern, singleCaseExpression, context } =
+fixInNewLet : SinglePatternCase -> List Fix
+fixInNewLet { caseExpression, range, singlePattern, singleExpression, context } =
     [ String.concat
         [ "let\n    ("
-        , context.extractSourceCode (Node.range singleCasePattern)
+        , context.extractSourceCode (Node.range singlePattern)
         , ") =\n"
         , "        "
-        , context.extractSourceCode (Node.range expressionInCaseOf)
+        , context.extractSourceCode (Node.range caseExpression)
             |> reindent 4
         , "\nin\n"
-        , context.extractSourceCode (Node.range singleCaseExpression)
+        , context.extractSourceCode (Node.range singleExpression)
         ]
-        |> reindent caseRange.start.column
-        |> Fix.replaceRangeBy caseRange
+        |> reindent range.start.column
+        |> Fix.replaceRangeBy range
     ]
 
 
@@ -1117,7 +1139,7 @@ exists. This requires all names in expression to be in scope in the `let` and
 checks for name clashes in the pattern to be moved.
 -}
 getValidLetBlock : LocalContext -> Node Expression -> ( Node Pattern, Node Expression ) -> Maybe LetBlock
-getValidLetBlock { newBindingsSinceLastLet, closestLetBlock } caseExpr ( singleCasePattern, singleCaseExpr ) =
+getValidLetBlock { newBindingsSinceLastLet, closestLetBlock } caseExpr ( singlePattern, singleCaseExpr ) =
     if
         allBindingsUsedInExpression caseExpr
             |> Set.intersect newBindingsSinceLastLet
@@ -1128,7 +1150,7 @@ getValidLetBlock { newBindingsSinceLastLet, closestLetBlock } caseExpr ( singleC
             |> Maybe.andThen
                 (\{ expression, letBlock } ->
                     if
-                        allBindingsInPattern singleCaseExpr singleCasePattern
+                        allBindingsInPattern singleCaseExpr singlePattern
                             |> List.any (\( n, _ ) -> nameUsedOutsideExpr n singleCaseExpr expression)
                     then
                         -- Cannot move due to name clash
@@ -1157,8 +1179,8 @@ would become
         2
 
 -}
-replaceCaseBlockWithExpression : SinglePatternCaseInfo -> Fix
-replaceCaseBlockWithExpression { context, singleCaseExpression, caseRange } =
-    Node.range singleCaseExpression
+replaceCaseBlockWithExpression : SinglePatternCase -> Fix
+replaceCaseBlockWithExpression { context, singleExpression, range } =
+    Node.range singleExpression
         |> context.extractSourceCode
-        |> Fix.replaceRangeBy caseRange
+        |> Fix.replaceRangeBy range
