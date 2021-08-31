@@ -198,7 +198,7 @@ allBindingsInPattern scope pattern =
 
 {-| Count the uses of a given name in the scope of an expression.
 -}
-countUsesIn : Node Expression -> String -> number_
+countUsesIn : Node Expression -> String -> Int
 countUsesIn expr name =
     case Node.value expr of
         -- If the name is qualified, it isn't a variable
