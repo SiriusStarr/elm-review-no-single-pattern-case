@@ -9,7 +9,7 @@ module NoSinglePatternCase exposing
 {-|
 
 
-# Rule
+## Review Rule
 
 @docs rule
 
@@ -77,7 +77,7 @@ or removed entirely.
 See [`Config`](#Config) for configuration details.
 
 
-## Fail
+## Fails
 
 Single-pattern case expressions for destructuring are not allowed, as:
 
@@ -160,6 +160,8 @@ type alias ModuleContext =
     { extractSourceCode : Range -> String }
 
 
+{-| Create an initial context with source code extractor.
+-}
 initialContext : Rule.ContextCreator () ModuleContext
 initialContext =
     Rule.initContextCreator
@@ -762,6 +764,16 @@ checkDeclaration config d context =
     )
 
 
+{-| The local context in which a single-pattern case exists.
+
+  - `bindings` -- All bindings in local scope.
+  - `closestLetBlock` -- The closest `let` block to the single-pattern case,
+    i.e. the one most closely "above" in the AST.
+  - `newBindingsSinceLastLet` -- All new bindings added since the last `let`
+    block (that could cause a name clash if a new name were added at the `let`).
+  - `extractSourceCode` -- Source code extractor.
+
+-}
 type alias LocalContext =
     { bindings : Dict String Binding
     , closestLetBlock :

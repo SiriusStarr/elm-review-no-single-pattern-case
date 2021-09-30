@@ -10,6 +10,9 @@ module Util exposing
     , subexpressions
     )
 
+{-| General utility functions not directly related to the specific rule.
+-}
+
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern(..))

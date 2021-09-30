@@ -12,7 +12,10 @@ when inside the directory containing this file.
 -}
 
 import CognitiveComplexity
-import Documentation.ReadmeLinksPointToCurrentVersion
+import Docs.NoMissing exposing (allModules, everything)
+import Docs.ReviewAtDocs
+import Docs.ReviewLinksAndSections
+import Docs.UpToDateReadmeLinks
 import NoDebug.Log
 import NoDebug.TodoOrToString
 import NoExposingEverything
@@ -37,7 +40,14 @@ import Simplify
 
 config : List Rule
 config =
-    [ Documentation.ReadmeLinksPointToCurrentVersion.rule
+    [ Docs.NoMissing.rule
+        { document = everything
+        , from = allModules
+        }
+        |> Rule.ignoreErrorsForDirectories [ "tests" ]
+    , Docs.ReviewLinksAndSections.rule
+    , Docs.ReviewAtDocs.rule
+    , Docs.UpToDateReadmeLinks.rule
     , NoDebug.Log.rule
     , NoDebug.TodoOrToString.rule
         |> Rule.ignoreErrorsForDirectories [ "tests/" ]
