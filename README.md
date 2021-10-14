@@ -4,7 +4,7 @@ Provides [`elm-review`](https://package.elm-lang.org/packages/jfmengels/elm-revi
 
 ## Provided rules
 
-* [🔧 `NoSinglePatternCase`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/2.0.0/NoSinglePatternCase) - Reports `case...of` expressions that match only a single pattern.  Such case expressions typically are either unnecessary or may be written more concisely.
+* [🔧 `NoSinglePatternCase`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/2.0.1/NoSinglePatternCase/) - Reports `case...of` expressions that match only a single pattern.  Such case expressions typically are either unnecessary or may be written more concisely.
 
 ## Configuration
 
@@ -31,6 +31,8 @@ elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example
 
 ## Changelog
 
+* 2.0.1 -- Bump `elm-syntax` to v7.2.8, fixing issued with lambda ranges.
+  Unlikely to affect this rule in practice, however.
 * 2.0.0 -- Add fixes, with option to destructure in the argument or in a `let`
 * 1.0.1 -- Fix minor documentation issue
 * 1.0.0 -- Initial release
