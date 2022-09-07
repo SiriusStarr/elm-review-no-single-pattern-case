@@ -71,8 +71,8 @@ always2 a =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case a of
-        _ -> 2""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "_"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 always2 : a -> Int
 always2 a =
@@ -90,8 +90,9 @@ pointless unit =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case unit of
-        () -> True""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "()"
+                            |> Review.Test.atExactly { start = { row = 6, column = 9 }, end = { row = 6, column = 11 } }
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 pointless : () -> Bool
 pointless unit =
@@ -109,8 +110,8 @@ pointless record =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case record of
-        ({ n } as r) -> True""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "({ n } as r)"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 pointless : { n : a } -> Bool
 pointless record =
@@ -130,8 +131,8 @@ pointless a =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case a of
-        A int -> True""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "A int"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type A = A Int
 
@@ -162,8 +163,8 @@ always2 a =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case a of
-        _ -> 2""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "_"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 always2 : a -> Int
 always2 _ =
@@ -185,8 +186,9 @@ pointless unit =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case unit of
-        () -> True""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "()"
+                            |> Review.Test.atExactly { start = { row = 6, column = 9 }, end = { row = 6, column = 11 } }
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 pointless : () -> Bool
 pointless _ =
@@ -208,8 +210,8 @@ pointless record =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case record of
-        ({ n } as r) -> True""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "({ n } as r)"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 pointless : { n : a } -> Bool
 pointless _ =
@@ -233,8 +235,8 @@ pointless a =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case a of
-        A int -> True""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "A int"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type A = A Int
 
@@ -262,8 +264,8 @@ pointless b =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case b of
-        B (A i1) (A i2) -> True""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "B (A i1) (A i2)"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type A = A Int
 
@@ -289,8 +291,8 @@ pointless {a, b} =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case (a, b) of
-        (_, _) -> True""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "(_, _)"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 pointless : {a : Int, b : Int} -> Bool
 pointless {a, b} =
@@ -317,8 +319,8 @@ pointless a =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case b of
-        A int -> True""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "A int"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type A = A Int
 
@@ -348,8 +350,8 @@ pointless a b c =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case (a, b, c) of
-        (_, _, _) -> True""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "(_, _, _)"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 pointless : Int -> Int -> Int -> Bool
 pointless _ b _ =
@@ -378,8 +380,8 @@ unpack o =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -401,8 +403,8 @@ unpack o =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i + i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -428,8 +430,8 @@ unpack =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-                Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -456,8 +458,8 @@ unpack =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-            Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -491,11 +493,7 @@ withUnpacked map =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case map of
-        Opaque i ->
-            ( i
-            , List.map ((+) 1) [ 1 ]
-            )"""
+                        [ error "Opaque i"
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
@@ -528,8 +526,7 @@ f x =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case a of
-                Opaque i -> i"""
+                        [ error "Opaque i"
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
@@ -560,15 +557,16 @@ withUnpacked o =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> ( i, o )""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
 withUnpacked : Opaque -> ( Int, Opaque )
 withUnpacked ((Opaque i) as o) =
     ( i, o )
-""" ]
+"""
+                        ]
         , test "works in case patterns" <|
             \() ->
                 """module A exposing (..)
@@ -589,8 +587,8 @@ withUnpacked aOrB =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-                Opaque i -> ( i + 1, o )"""
+                        [ error "Opaque i"
+                            |> Review.Test.atExactly { start = { row = 12, column = 17 }, end = { row = 12, column = 25 } }
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -607,8 +605,8 @@ withUnpacked aOrB =
             case o of
                 Opaque i -> ( i - 1, o )
 """
-                        , error """case o of
-                Opaque i -> ( i - 1, o )"""
+                        , error "Opaque i"
+                            |> Review.Test.atExactly { start = { row = 15, column = 17 }, end = { row = 15, column = 25 } }
                             |> Review.Test.whenFixed
                                 """module A exposing (..)
 
@@ -646,8 +644,9 @@ unpack ((Opaque ii) as oo) =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-                Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.atExactly { start = { row = 13, column = 17 }, end = { row = 13, column = 25 } }
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque a = Opaque a
 
@@ -691,8 +690,7 @@ withUnpacked o =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> ( i, o )""" ]
+                        [ error "Opaque i" ]
         , test "to existing let" <|
             \() ->
                 """module A exposing (..)
@@ -717,8 +715,8 @@ withUnpacked o =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> ( i, o )""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -732,7 +730,8 @@ withUnpacked o =
             o
     in
     ( i, o )
-""" ]
+"""
+                        ]
         , test "no existing lets, back to as" <|
             \() ->
                 """module A exposing (..)
@@ -753,15 +752,16 @@ withUnpacked o =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> ( i, o )""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
 withUnpacked : Opaque -> ( Int, Opaque )
 withUnpacked ((Opaque i) as o) =
     ( i, o )
-""" ]
+"""
+                        ]
         , test "no existing lets, fail" <|
             \() ->
                 """module A exposing (..)
@@ -782,8 +782,7 @@ withUnpacked o =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> ( i, o )""" ]
+                        [ error "Opaque i" ]
         , test "no existing lets, creates new" <|
             \() ->
                 """module A exposing (..)
@@ -804,8 +803,8 @@ withUnpacked o =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> ( i, o )""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -816,7 +815,8 @@ withUnpacked o =
             o
     in
     ( i, o )
-""" ]
+"""
+                        ]
         ]
 
 
@@ -836,8 +836,7 @@ unpack o =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case ( o, o ) of
-        ( Opaque i, Opaque ii ) -> i"""
+                        [ error "( Opaque i, Opaque ii )"
                         ]
         , test "because case expression is variable out of scope" <|
             \() ->
@@ -856,8 +855,7 @@ unpacked =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case topLevel of
-        Opaque i -> i"""
+                        [ error "Opaque i"
                         ]
         , test "because the variable in case expression is from a pattern after as" <|
             \() ->
@@ -872,8 +870,8 @@ unpack ((Opaque ii) as o) =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i"""
+                        [ error "Opaque i"
+                            |> Review.Test.atExactly { start = { row = 8, column = 9 }, end = { row = 8, column = 17 } }
                         ]
         , test "because the variable in case expression is from a record field pattern" <|
             \() ->
@@ -888,8 +886,7 @@ unpack { o } =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i"""
+                        [ error "Opaque i"
                         ]
         , test "because the variable in case expression is an annotated let binding" <|
             \() ->
@@ -912,8 +909,7 @@ unpack oo =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-                Opaque i -> i"""
+                        [ error "Opaque i"
                         ]
         , test "because a var in increased scope would cause a name clash" <|
             \() ->
@@ -932,8 +928,7 @@ unpack o =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i"""
+                        [ error "Opaque i"
                         ]
         , cannotDestructureFallbackSuite
         ]
@@ -959,8 +954,7 @@ unpack { o } =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i""" ]
+                        [ error "Opaque i" ]
         , test "to existing let" <|
             \() ->
                 """module A exposing (..)
@@ -985,8 +979,8 @@ unpack { o } =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1000,7 +994,8 @@ unpack { o } =
             o
     in
     i
-""" ]
+"""
+                        ]
         , test "no existing lets, fails" <|
             \() ->
                 """module A exposing (..)
@@ -1021,8 +1016,7 @@ unpack { o } =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i""" ]
+                        [ error "Opaque i" ]
         , test "no existing lets, creates new" <|
             \() ->
                 """module A exposing (..)
@@ -1043,8 +1037,8 @@ unpack { o } =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1055,7 +1049,8 @@ unpack { o } =
             o
     in
     i
-""" ]
+"""
+                        ]
         ]
 
 
@@ -1079,8 +1074,8 @@ unpack o =
 """
                     |> Review.Test.run (rule fixInLet)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1119,14 +1114,8 @@ withUnpacked map =
 """
                     |> Review.Test.run (rule fixInLet)
                     |> Review.Test.expectErrors
-                        [ error """case
-        foo
-            (always map)
-    of
-        Opaque i ->
-            ( i
-            , List.map ((+) 1) [ 1 ]
-            )""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1162,8 +1151,8 @@ unpack o =
 """
                     |> Review.Test.run (rule fixInLet)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i + i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1203,11 +1192,8 @@ unpack =
 """
                     |> Review.Test.run (rule fixInLet)
                     |> Review.Test.expectErrors
-                        [ error """case foo
-                |> o
-            of
-                Opaque i -> i
-                    + i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1247,8 +1233,8 @@ unpack =
 """
                     |> Review.Test.run (rule fixInLet)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-            Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1282,8 +1268,8 @@ unpack o =
 """
                     |> Review.Test.run (rule fixInLet)
                     |> Review.Test.expectErrors
-                        [ error """case o of
-                Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1323,8 +1309,7 @@ unpack o =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i"""
+                        [ error "Opaque i"
                         ]
         , test "due to reliance on scope" <|
             \() ->
@@ -1349,8 +1334,7 @@ unpack o =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case a of
-        Opaque i -> i"""
+                        [ error "Opaque i"
                         ]
         , createNewLetSuite
         , fallbackToArgSuite
@@ -1377,8 +1361,8 @@ unpack o =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1410,14 +1394,8 @@ withUnpacked map =
 """
                     |> Review.Test.run (rule fixInLet)
                     |> Review.Test.expectErrors
-                        [ error """case
-        foo
-            (always map)
-    of
-        Opaque i ->
-            ( i
-            , List.map ((+) 1) [ 1 ]
-            )""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1456,8 +1434,8 @@ unpack o =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case a of
-        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1503,8 +1481,8 @@ unpack o =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case o of
-        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1540,8 +1518,8 @@ unpack o =
                             |> rule
                         )
                     |> Review.Test.expectErrors
-                        [ error """case a of
-        Opaque i -> i""" |> Review.Test.whenFixed """module A exposing (..)
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1578,8 +1556,8 @@ unpack o =
                                 |> rule
                             )
                         |> Review.Test.expectErrors
-                            [ error """case o of
-        Opaque i -> ( o, i )""" |> Review.Test.whenFixed """module A exposing (..)
+                            [ error "Opaque i"
+                                |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1609,8 +1587,7 @@ unpack o =
                                 |> rule
                             )
                         |> Review.Test.expectErrors
-                            [ error """case o of
-        Opaque i -> ( o, i )"""
+                            [ error "Opaque i"
                             ]
             , test "creates new let" <|
                 \() ->
@@ -1633,8 +1610,8 @@ unpack o =
                                 |> rule
                             )
                         |> Review.Test.expectErrors
-                            [ error """case o of
-        Opaque i -> ( o, i )""" |> Review.Test.whenFixed """module A exposing (..)
+                            [ error "Opaque i"
+                                |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
 
@@ -1670,8 +1647,7 @@ unpack o =
                                 |> rule
                             )
                         |> Review.Test.expectErrors
-                            [ error """case ( o, o ) of
-        ( Opaque i, Opaque ii ) -> i"""
+                            [ error "( Opaque i, Opaque ii )"
                             ]
             , test "because case expression is variable out of scope" <|
                 \() ->
@@ -1698,8 +1674,7 @@ unpacked =
                                 |> rule
                             )
                         |> Review.Test.expectErrors
-                            [ error """case topLevel of
-        Opaque i -> i"""
+                            [ error "Opaque i"
                             ]
             , test "because the variable in case expression is from a pattern after as" <|
                 \() ->
@@ -1722,8 +1697,8 @@ unpack ((Opaque ii) as o) =
                                 |> rule
                             )
                         |> Review.Test.expectErrors
-                            [ error """case o of
-        Opaque i -> i"""
+                            [ error "Opaque i"
+                                |> Review.Test.atExactly { start = { row = 8, column = 9 }, end = { row = 8, column = 17 } }
                             ]
             , test "because the variable in case expression is from a record field pattern" <|
                 \() ->
@@ -1746,8 +1721,7 @@ unpack { o } =
                                 |> rule
                             )
                         |> Review.Test.expectErrors
-                            [ error """case o of
-        Opaque i -> i"""
+                            [ error "Opaque i"
                             ]
             , test "because a var in increased scope would cause a name clash" <|
                 \() ->
@@ -1774,8 +1748,7 @@ unpack o =
                                 |> rule
                             )
                         |> Review.Test.expectErrors
-                            [ error """case o of
-        Opaque i -> i"""
+                            [ error "Opaque i"
                             ]
             , describe "fallback"
                 [ test "createNewLet" <|
@@ -1799,8 +1772,7 @@ unpack { o } =
                                     |> rule
                                 )
                             |> Review.Test.expectErrors
-                                [ error """case o of
-        Opaque i -> i"""
+                                [ error "Opaque i"
                                     |> Review.Test.whenFixed """module A exposing (..)
 
 type Opaque = Opaque Int
