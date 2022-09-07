@@ -142,7 +142,7 @@ This rule is not useful if you prefer the more verbose style.
 You can try this rule out by running the following command:
 
 ```bash
-elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example --rules NoSinglePatternCase
+elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example/fix-in-argument --rules NoSinglePatternCase
 ```
 
 -}

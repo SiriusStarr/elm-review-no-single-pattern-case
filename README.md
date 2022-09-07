@@ -26,7 +26,7 @@ config =
 You can try the example configuration above out by running the following command:
 
 ```bash
-elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example
+elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example/fix-in-argument --rules NoSinglePatternCase
 ```
 
 ## Changelog
