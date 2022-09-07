@@ -823,15 +823,16 @@ checkExpression config ({ bindings } as context) expressionNode =
     case Node.value expressionNode of
         CaseExpression caseBlock ->
             case caseBlock.cases of
-                [ ( singlePattern, singleExpression ) ] ->
-                    [ singlePatternCaseError config
+                [ ( p, e ) ] ->
+                    singlePatternCaseError config
                         { context = context
                         , caseExpression = caseBlock.expression
-                        , singlePattern = singlePattern
-                        , singleExpression = singleExpression
+                        , singlePattern = p
+                        , singleExpression = e
                         , range = Node.range expressionNode
                         }
-                    ]
+                        :: -- Add pattern match bindings
+                           go Nothing (allBindingsInPattern e p) e
 
                 multipleCases ->
                     multipleCases
