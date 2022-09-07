@@ -471,9 +471,88 @@ unpack =
                         ]
         , asPatternSuite
         , cannotDestructureInArgSuite
+        , nestedSuite
         ]
 
 
+nestedSuite : Test
+nestedSuite =
+    describe "nested single pattern"
+        [ test "simple case" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case () of
+        _ ->
+            case o of
+                Opaque i -> i
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "_"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case o of
+                Opaque i -> i
+"""
+                        , error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack (Opaque i) =
+    case () of
+        _ ->
+            i
+"""
+                        ]
+        , test "nested same" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case o of
+        Opaque i ->
+            case o of
+                Opaque j -> j
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case o of
+                Opaque j -> j
+"""
+                        , error "Opaque j"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack ((Opaque j) as o) =
+    case o of
+        Opaque i ->
+            j
+"""
+                        ]
+        ]
 asPatternSuite : Test
 asPatternSuite =
     describe "as pattern"
