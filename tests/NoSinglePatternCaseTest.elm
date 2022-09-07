@@ -553,6 +553,8 @@ unpack ((Opaque j) as o) =
 """
                         ]
         ]
+
+
 asPatternSuite : Test
 asPatternSuite =
     describe "as pattern"
