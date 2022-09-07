@@ -939,7 +939,7 @@ singlePatternCaseError ((Config { replaceUseless }) as config) info =
             { message = "Single pattern case block."
             , details = [ "Single pattern case blocks typically are either unnecessary or overly verbose.  There's usually a more concise way to destructure, e.g. in a function argument, so consider refactoring." ]
             }
-            info.range
+            (Node.range info.singlePattern)
 
 
 {-| Given config and info about a single pattern case, try to create a fix per
