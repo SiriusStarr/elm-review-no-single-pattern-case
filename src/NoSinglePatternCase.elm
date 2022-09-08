@@ -1136,11 +1136,6 @@ solely of a name and its binding location can be destructured at.
 -}
 getDestructurableBinding : LocalContext -> Node Expression -> Maybe ( String, Binding )
 getDestructurableBinding ({ bindings } as context) expr =
-    let
-        go : Node Expression -> Maybe ( String, Binding )
-        go =
-            getDestructurableBinding context
-    in
     case Node.value expr of
         FunctionOrValue [] name ->
             Dict.get name bindings
@@ -1148,7 +1143,7 @@ getDestructurableBinding ({ bindings } as context) expr =
                 |> Maybe.map (Tuple.pair name)
 
         ParenthesizedExpression e ->
-            go e
+            getDestructurableBinding context e
 
         _ ->
             Nothing
