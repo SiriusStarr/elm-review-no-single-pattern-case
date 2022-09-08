@@ -552,6 +552,83 @@ unpack ((Opaque j) as o) =
             j
 """
                         ]
+        , test "nested in case ... of" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case
+        case o of
+            Opaque i ->
+                i
+    of
+        1 ->
+            True
+        _ ->
+            False
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack (Opaque i) =
+    case
+        i
+    of
+        1 ->
+            True
+        _ ->
+            False
+"""
+                        ]
+        , test "nested in single-pattern case ... of" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case
+        case o of
+            Opaque i ->
+                i
+    of
+        _ ->
+            True
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "_"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    True
+"""
+                        , error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack (Opaque i) =
+    case
+        i
+    of
+        _ ->
+            True
+"""
+                        ]
         ]
 
 
