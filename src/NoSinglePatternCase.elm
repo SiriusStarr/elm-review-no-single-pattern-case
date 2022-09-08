@@ -1135,12 +1135,20 @@ fixInNewLet { caseExpression, range, singlePattern, singleExpression, context } 
 solely of a name and its binding location can be destructured at.
 -}
 getDestructurableBinding : LocalContext -> Node Expression -> Maybe ( String, Binding )
-getDestructurableBinding { bindings } expr =
+getDestructurableBinding ({ bindings } as context) expr =
+    let
+        go : Node Expression -> Maybe ( String, Binding )
+        go =
+            getDestructurableBinding context
+    in
     case Node.value expr of
         FunctionOrValue [] name ->
             Dict.get name bindings
                 |> MaybeX.filter .canDestructureAt
                 |> Maybe.map (Tuple.pair name)
+
+        ParenthesizedExpression e ->
+            go e
 
         _ ->
             Nothing
