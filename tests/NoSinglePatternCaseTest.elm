@@ -472,6 +472,36 @@ unpack =
         , asPatternSuite
         , cannotDestructureInArgSuite
         , nestedSuite
+        , getBindingSuite
+        ]
+
+
+getBindingSuite : Test
+getBindingSuite =
+    describe "get bindings"
+        [ test "parenthesized" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case (o) of
+        Opaque i -> i
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack (Opaque i) =
+    i
+"""
+                        ]
         ]
 
 
