@@ -822,7 +822,7 @@ checkExpression config ({ bindings } as context) expressionNode =
     in
     case Node.value expressionNode of
         CaseExpression caseBlock ->
-            case caseBlock.cases of
+            (case caseBlock.cases of
                 [ ( p, e ) ] ->
                     singlePatternCaseError config
                         { context = context
@@ -841,6 +841,9 @@ checkExpression config ({ bindings } as context) expressionNode =
                                 -- Add pattern match bindings
                                 go Nothing (allBindingsInPattern e p) e
                             )
+            )
+                ++ -- Check expression in case...of as well
+                   go Nothing [] caseBlock.expression
 
         LetExpression lB ->
             let
