@@ -4,7 +4,7 @@ module Util exposing
     , allBindingsInPattern
     , allBindingsUsedInExpression
     , countUsesIn
-    , either
+    , either3
     , nameUsedOutsideExpr
     , reindent
     , subexpressions
@@ -281,3 +281,10 @@ either fA fB aOrB =
 
         B b ->
             fB b
+
+
+{-| Case analysis for nested `Either` type.
+-}
+either3 : Either (Either a b) c -> (a -> out) -> (b -> out) -> (c -> out) -> out
+either3 abc a b c =
+    either (either a b) c abc

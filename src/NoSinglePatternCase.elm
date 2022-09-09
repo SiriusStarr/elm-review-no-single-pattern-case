@@ -61,7 +61,7 @@ import Util
         , allBindingsInPattern
         , allBindingsUsedInExpression
         , countUsesIn
-        , either
+        , either3
         , nameUsedOutsideExpr
         , reindent
         , subexpressions
@@ -952,14 +952,18 @@ the config or fail.
 makeFix : Config fixBy -> SinglePatternCase -> List Fix
 makeFix (Config { fixBy }) ({ context, caseExpression, singleExpression, singlePattern } as info) =
     let
-        destructureInLet : (Either a b -> List Fix) -> Either (Either a b) Fail -> List Fix
-        destructureInLet fallback ifNoLetBlock =
+        destructureInLet :
+            { ifNoLetBlock : Either (Either CreateNewLet noLetFix) Fail
+            , noLetFix : noLetFix -> List Fix
+            }
+            -> List Fix
+        destructureInLet { ifNoLetBlock, noLetFix } =
             case getValidLetBlock context caseExpression ( singlePattern, singleExpression ) of
                 Just existingLetBlock ->
                     moveCasePatternToLetBlock info existingLetBlock
 
                 Nothing ->
-                    either fallback orFail ifNoLetBlock
+                    either3 ifNoLetBlock useNewLet noLetFix orFail
 
         useNewLet : CreateNewLet -> List Fix
         useNewLet CreateNewLet =
@@ -967,44 +971,64 @@ makeFix (Config { fixBy }) ({ context, caseExpression, singleExpression, singleP
 
         fallbackToArg : UseArgInstead -> List Fix
         fallbackToArg (UseArgInstead { ifAsPatternNeeded, ifCannotDestructure }) =
-            destructureInArg (always useNewLet) useNewLet ifAsPatternNeeded ifCannotDestructure
+            destructureInArg
+                { asPatternFix = always useNewLet
+                , cannotDestructureFix = useNewLet
+                , ifAsPatternNeeded = ifAsPatternNeeded
+                , ifCannotDestructure = ifCannotDestructure
+                }
 
         orFail : Fail -> List Fix
         orFail Fail =
             []
 
-        fallbackToLet : (a -> List Fix) -> (b -> List Fix) -> UseLetInstead (Either (Either a b) Fail) -> List Fix
-        fallbackToLet fA fB (UseLetInstead { ifNoLetBlock }) =
-            destructureInLet (either fA fB) ifNoLetBlock
+        fallbackToLet : (noLetFix -> List Fix) -> UseLetInstead (Either (Either CreateNewLet noLetFix) Fail) -> List Fix
+        fallbackToLet noLetFix (UseLetInstead { ifNoLetBlock }) =
+            destructureInLet
+                { ifNoLetBlock = ifNoLetBlock
+                , noLetFix = noLetFix
+                }
 
         orUseAsPattern : ( String, Binding ) -> UseAsPattern -> List Fix
         orUseAsPattern ( name, binding ) UseAsPattern =
             moveCasePatternToBinding info binding (Just name)
 
-        destructureInArg : (( String, Binding ) -> asFallback -> List Fix) -> (destructureFallback -> List Fix) -> Either (Either asFallback UseAsPattern) Fail -> Either (Either destructureFallback Fail) Fail -> List Fix
-        destructureInArg asFallback destructureFallback ifAsPatternNeeded ifCannotDestructure =
+        destructureInArg :
+            { asPatternFix : ( String, Binding ) -> asFallback -> List Fix
+            , cannotDestructureFix : destructureFallback -> List Fix
+            , ifAsPatternNeeded : Either (Either asFallback UseAsPattern) Fail
+            , ifCannotDestructure : Either (Either destructureFallback Fail) Fail
+            }
+            -> List Fix
+        destructureInArg { asPatternFix, cannotDestructureFix, ifAsPatternNeeded, ifCannotDestructure } =
             case getValidPatternBinding context caseExpression ( singlePattern, singleExpression ) of
                 Just { name, binding, requiresAsPattern } ->
                     if requiresAsPattern then
-                        either (either (asFallback ( name, binding )) (orUseAsPattern ( name, binding )))
+                        either3 ifAsPatternNeeded
+                            (asPatternFix ( name, binding ))
+                            (orUseAsPattern ( name, binding ))
                             orFail
-                            ifAsPatternNeeded
 
                     else
                         moveCasePatternToBinding info binding Nothing
 
                 Nothing ->
-                    either (either destructureFallback orFail) orFail ifCannotDestructure
+                    either3 ifCannotDestructure cannotDestructureFix orFail orFail
     in
     case fixBy of
         DestructureInLet { ifNoLetBlock } ->
-            destructureInLet (either useNewLet fallbackToArg) ifNoLetBlock
+            destructureInLet
+                { noLetFix = fallbackToArg
+                , ifNoLetBlock = ifNoLetBlock
+                }
 
         DestructureInArgument { ifAsPatternNeeded, ifCannotDestructure } ->
-            destructureInArg (\b -> fallbackToLet useNewLet (orUseAsPattern b))
-                (fallbackToLet useNewLet orFail)
-                ifAsPatternNeeded
-                ifCannotDestructure
+            destructureInArg
+                { asPatternFix = \b -> fallbackToLet (orUseAsPattern b)
+                , cannotDestructureFix = fallbackToLet orFail
+                , ifAsPatternNeeded = ifAsPatternNeeded
+                , ifCannotDestructure = ifCannotDestructure
+                }
 
 
 {-| Given the full range of a `case` block, a binding to destructure at, maybe a
