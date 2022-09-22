@@ -1017,14 +1017,14 @@ cannotDestructureInArgSuite =
 
 type Opaque = Opaque Int
 
-unpack : Opaque -> Int
-unpack o =
-    case ( o, o ) of
-        ( Opaque i, Opaque ii ) -> i
+unpack : { a : Opaque } -> Int
+unpack a =
+    case a.o of
+        Opaque i -> i
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectErrors
-                        [ error "( Opaque i, Opaque ii )"
+                        [ error "Opaque i"
                         ]
         , test "because case expression is variable out of scope" <|
             \() ->
@@ -1820,10 +1820,10 @@ unpack o =
 
 type Opaque = Opaque Int
 
-unpack : Opaque -> Int
-unpack o =
-    case ( o, o ) of
-        ( Opaque i, Opaque ii ) -> i
+unpack : { a : Opaque } -> Int
+unpack a =
+    case a.o of
+        Opaque i -> i
 """
                         |> Review.Test.run
                             (fixInLet
@@ -1835,7 +1835,7 @@ unpack o =
                                 |> rule
                             )
                         |> Review.Test.expectErrors
-                            [ error "( Opaque i, Opaque ii )"
+                            [ error "Opaque i"
                             ]
             , test "because case expression is variable out of scope" <|
                 \() ->
