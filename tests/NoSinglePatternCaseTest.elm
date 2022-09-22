@@ -191,7 +191,7 @@ pointless unit =
                             |> Review.Test.whenFixed """module A exposing (..)
 
 pointless : () -> Bool
-pointless _ =
+pointless () =
     True
 """
                         ]
