@@ -571,6 +571,229 @@ unpack (Opaque i) =
     i
 """
                         ]
+        , test "tupled" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> Opaque
+add a b =
+    case ( a, b ) of
+        ( Opaque i1, Opaque i2 ) ->
+            Opaque <| i1 + i2
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "( Opaque i1, Opaque i2 )"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> Opaque
+add (Opaque i1) (Opaque i2) =
+    Opaque <| i1 + i2
+"""
+                        ]
+        , test "tupled same binding" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    case ( o, o ) of
+        ( Opaque i, Opaque ii ) -> i + ii
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "( Opaque i, Opaque ii )"
+                        ]
+        , test "tupled to let" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> Opaque
+add a b =
+    case ( a, b ) of
+        ( Opaque i1, Opaque i2 ) ->
+            Opaque <| i1 + i2
+"""
+                    |> Review.Test.run (rule fixInLet)
+                    |> Review.Test.expectErrors
+                        [ error "( Opaque i1, Opaque i2 )"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> Opaque
+add a b =
+    let
+        (Opaque i1) =
+            a
+
+        (Opaque i2) =
+            b
+    in
+    Opaque <| i1 + i2
+"""
+                        ]
+        , test "tupled both as needed" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> (Opaque, Opaque, Opaque)
+add a b =
+    case ( a, b ) of
+        ( Opaque i1, Opaque i2 ) ->
+            (Opaque <| i1 + i2, a, b)
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "( Opaque i1, Opaque i2 )"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> (Opaque, Opaque, Opaque)
+add ((Opaque i1) as a) ((Opaque i2) as b) =
+    (Opaque <| i1 + i2, a, b)
+"""
+                        ]
+        , test "tupled one as needed" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> (Opaque, Opaque)
+add a b =
+    case ( a, b ) of
+        ( Opaque i1, Opaque i2 ) ->
+            (Opaque <| i1 + i2, a)
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "( Opaque i1, Opaque i2 )"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> (Opaque, Opaque)
+add ((Opaque i1) as a) (Opaque i2) =
+    (Opaque <| i1 + i2, a)
+"""
+                        ]
+        , test "tupled one as needed fallback to let" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> (Opaque, Opaque)
+add a b =
+    case ( a, b ) of
+        ( Opaque i1, Opaque i2 ) ->
+            (Opaque <| i1 + i2, a)
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> ifAsPatternRequired
+                                (fixInLetInstead
+                                    |> andIfNoLetExists createNewLet
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "( Opaque i1, Opaque i2 )"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> (Opaque, Opaque)
+add a (Opaque i2) =
+    let
+        (Opaque i1) =
+            a
+    in
+    (Opaque <| i1 + i2, a)
+"""
+                        ]
+        , test "tupled one as needed use let instead" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> (Opaque, Opaque)
+add a b =
+    case ( a, b ) of
+        ( Opaque i1, Opaque i2 ) ->
+            (Opaque <| i1 + i2, a)
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> ifAsPatternRequired
+                                (fixInLetInstead
+                                    |> andIfNoLetExists createNewLet
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "( Opaque i1, Opaque i2 )"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> (Opaque, Opaque)
+add a (Opaque i2) =
+    let
+        (Opaque i1) =
+            a
+    in
+    (Opaque <| i1 + i2, a)
+"""
+                        ]
+        , test "tupled one destructurable use let instead" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : { a : Opaque } -> Opaque -> Opaque
+add {a} b =
+    case ( a, b ) of
+        ( Opaque i1, Opaque i2 ) ->
+            Opaque <| i1 + i2
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> ifCannotDestructureAtArgument
+                                (fixInLetInstead
+                                    |> andIfNoLetExists createNewLet
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "( Opaque i1, Opaque i2 )"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : { a : Opaque } -> Opaque -> Opaque
+add {a} (Opaque i2) =
+    let
+        (Opaque i1) =
+            a
+    in
+    Opaque <| i1 + i2
+"""
+                        ]
         ]
 
 
