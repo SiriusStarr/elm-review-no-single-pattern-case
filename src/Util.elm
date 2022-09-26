@@ -5,7 +5,7 @@ module Util exposing
     , allBindingsUsedInExpression
     , countUsesIn
     , either3
-    , nameUsedOutsideExpr
+    , nameUsedOutsideExprs
     , reindent
     , subexpressions
     )
@@ -218,12 +218,13 @@ countUsesIn expr name =
                 |> List.foldl (\e -> (+) (countUsesIn e name)) 0
 
 
-{-| Given a name, an inner expression, and an outer expression, report if the
-name is used in the outer expression exclusive of the inner expression.
+{-| Given a name, some number of inner expression, and an outer expression,
+report if the name is used in the outer expression exclusive of the inner
+expressions.
 -}
-nameUsedOutsideExpr : String -> Node Expression -> Node Expression -> Bool
-nameUsedOutsideExpr name inner outer =
-    countUsesIn outer name > countUsesIn inner name
+nameUsedOutsideExprs : String -> { inside : List (Node Expression), scope : Node Expression } -> Bool
+nameUsedOutsideExprs name { inside, scope } =
+    countUsesIn scope name > List.foldl (\e acc -> acc + countUsesIn e name) 0 inside
 
 
 {-| A binding with some scope.
