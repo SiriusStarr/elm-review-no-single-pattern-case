@@ -794,6 +794,134 @@ add {a} (Opaque i2) =
     Opaque <| i1 + i2
 """
                         ]
+        , test "as pattern" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> (Int, Opaque)
+unpack o =
+    case o of
+        ((Opaque i) as a) -> (i, a)
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "((Opaque i) as a)"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> (Int, Opaque)
+unpack ((Opaque i) as a) =
+    (i, a)
+"""
+                        ]
+        , test "unnecessary as pattern" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> (Int, Opaque)
+unpack o =
+    case o of
+        ((Opaque i) as a) -> i
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "((Opaque i) as a)"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> (Int, Opaque)
+unpack (Opaque i) =
+    i
+"""
+                        ]
+        , test "unnecessary tupled as pattern" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> Opaque
+add a b =
+    case ( a, b ) of
+        (( Opaque i1, Opaque i2 ) as unn) ->
+            Opaque <| i1 + i2
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "(( Opaque i1, Opaque i2 ) as unn)"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> Opaque
+add (Opaque i1) (Opaque i2) =
+    Opaque <| i1 + i2
+"""
+                        ]
+        , test "necessary tupled as pattern" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> (Opaque, Opaque)
+add a b =
+    case ( a, b ) of
+        (( Opaque i1, Opaque i2 ) as x) ->
+            (Opaque <| i1 + i2, x)
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> ifCannotDestructureAtArgument
+                                (fixInLetInstead
+                                    |> andIfNoLetExists createNewLet
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "(( Opaque i1, Opaque i2 ) as x)"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+add : Opaque -> Opaque -> (Opaque, Opaque)
+add a b =
+    let
+        (( Opaque i1, Opaque i2 ) as x) =
+            ( a, b )
+    in
+    (Opaque <| i1 + i2, x)
+"""
+                        ]
+        , test "conflicting as pattern" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> (Int, Opaque, Opaque)
+unpack o =
+    case o of
+        ((Opaque i) as a) -> (i, a, o)
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "((Opaque i) as a)"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> (Int, Opaque, Opaque)
+unpack (((Opaque i) as a) as o) =
+    (i, a, o)
+"""
+                        ]
         ]
 
 
