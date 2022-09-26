@@ -361,6 +361,75 @@ pointless _ b _ =
     True
 """
                         ]
+        , test "multiple some used" <|
+            \() ->
+                """module A exposing (..)
+
+pointless : Int -> Int -> () -> Int
+pointless a b c =
+    case (a, b, c) of
+        (_, b_, ()) -> b_
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "(_, b_, ())"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+pointless : Int -> Int -> () -> Int
+pointless _ (b_) () =
+    b_
+"""
+                        ]
+        , test "multiple in record some used" <|
+            \() ->
+                """module A exposing (..)
+
+pointless : Int -> Int -> () -> Int
+pointless a b c =
+    case { d = a, e = b, f = c } of
+        { d, e, f } -> e
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "{ d, e, f }"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+pointless : Int -> Int -> () -> Int
+pointless _ (e) _ =
+    e
+"""
+                        ]
+        , test "multiple in record some used repeatedly" <|
+            \() ->
+                """module A exposing (..)
+
+pointless : Int -> Int -> Int -> Int
+pointless a b c =
+    case { d = a, e = b, f = c, g = a, h = b, i = c } of
+        { d, e, f } -> e
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "{ d, e, f }"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+pointless : Int -> Int -> Int -> Int
+pointless _ (e) _ =
+    e
+"""
+                        ]
         ]
 
 
