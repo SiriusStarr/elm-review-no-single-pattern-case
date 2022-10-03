@@ -3,6 +3,7 @@ module Util exposing
     , Either(..)
     , allBindingsInPattern
     , allBindingsUsedInExpression
+    , allNamesInPattern
     , countUsesIn
     , either3
     , nameUsedOutsideExprs
@@ -127,23 +128,25 @@ allBindingsUsedInExpression expr =
                 |> List.foldl (\e -> Set.union (allBindingsUsedInExpression <| e)) Set.empty
 
 
-{-| Recursively find all bindings in a pattern and save whether or not
-destructuring could occur at the pattern.
+{-| Recursively find all names used in a pattern and save whether or not
+destructuring could occur at the pattern. Requires scope information to actually
+create the binding.
 -}
-allBindingsInPattern : Node Expression -> Node Pattern -> List ( String, Binding )
-allBindingsInPattern scope pattern =
+allNamesInPattern : Node Pattern -> List ( String, Node Expression -> Binding )
+allNamesInPattern pattern =
     let
-        go : List (Node Pattern) -> List ( String, Binding )
+        go : List (Node Pattern) -> List ( String, Node Expression -> Binding )
         go =
-            List.concatMap (allBindingsInPattern scope)
+            List.concatMap allNamesInPattern
 
-        makeBinding : Bool -> Node String -> ( String, Binding )
+        makeBinding : Bool -> Node String -> ( String, Node Expression -> Binding )
         makeBinding canDestructureAt name =
             ( Node.value name
-            , { patternNodeRange = Node.range name
-              , canDestructureAt = canDestructureAt
-              , scope = scope
-              }
+            , \scope ->
+                { patternNodeRange = Node.range name
+                , canDestructureAt = canDestructureAt
+                , scope = scope
+                }
             )
     in
     case Node.value pattern of
@@ -164,10 +167,11 @@ allBindingsInPattern scope pattern =
 
         VarPattern name ->
             [ ( name
-              , { patternNodeRange = Node.range pattern
-                , canDestructureAt = True
-                , scope = scope
-                }
+              , \scope ->
+                    { patternNodeRange = Node.range pattern
+                    , canDestructureAt = True
+                    , scope = scope
+                    }
               )
             ]
 
@@ -197,6 +201,15 @@ allBindingsInPattern scope pattern =
 
         FloatPattern _ ->
             []
+
+
+{-| Recursively find all bindings in a pattern and save whether or not
+destructuring could occur at the pattern.
+-}
+allBindingsInPattern : Node Expression -> Node Pattern -> List ( String, Binding )
+allBindingsInPattern scope =
+    allNamesInPattern
+        >> List.map (Tuple.mapSecond (\f -> f scope))
 
 
 {-| Count the uses of a given name in the scope of an expression.
