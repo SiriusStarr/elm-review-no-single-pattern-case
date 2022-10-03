@@ -1604,6 +1604,48 @@ unpack { o } =
     i
 """
                         ]
+                        , test "fall back due to name clash clash in pattern" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo i =
+            0
+    in
+    case o of
+        Opaque i -> i
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> ifCannotDestructureAtArgument
+                                (fixInLetInstead
+                                    |> andIfNoLetExists createNewLet
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo i =
+            0
+    in
+    let
+        (Opaque i) =
+            o
+    in
+    i
+"""
+                        ]
         , test "no existing lets, fails" <|
             \() ->
                 """module A exposing (..)
@@ -2060,6 +2102,45 @@ unpack o =
     in
     i
         ) o
+"""
+                        ]
+        , test "name clash in pattern" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo i =
+            0
+    in
+    case o of
+        Opaque i -> i
+"""
+                    |> Review.Test.run
+                        (fixInLet
+                            |> ifNoLetExists createNewLet
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "Opaque i"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo i =
+            0
+    in
+    let
+        (Opaque i) =
+            o
+    in
+    i
 """
                         ]
         ]
