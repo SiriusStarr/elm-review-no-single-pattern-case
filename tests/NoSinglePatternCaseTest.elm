@@ -571,6 +571,34 @@ unpack (Opaque i) =
     i
 """
                         ]
+        , test "function app" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+type Tuple a b = Tuple a b
+
+weirdWrap : Int -> Int -> Opaque Int
+weirdWrap a b =
+    case (Tuple a b) of
+        Tuple i1 i2 ->
+            Opaque <| i1 * i2
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "Tuple i1 i2"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+type Tuple a b = Tuple a b
+
+weirdWrap : Int -> Int -> Opaque Int
+weirdWrap (i1) (i2) =
+    Opaque <| i1 * i2
+"""
+                        ]
         , test "tupled" <|
             \() ->
                 """module A exposing (..)
