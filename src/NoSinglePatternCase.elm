@@ -63,6 +63,7 @@ import Elm.Syntax.Pattern exposing (Pattern)
 import Elm.Syntax.Range as Range exposing (Range)
 import Maybe.Extra as MaybeX
 import Review.Fix as Fix exposing (Fix)
+import Review.ModuleNameLookupTable as ModuleNameLookupTable exposing (ModuleNameLookupTable)
 import Review.Rule as Rule exposing (Error, Rule)
 import Set exposing (Set)
 import Util
@@ -167,7 +168,9 @@ rule config =
 {-| Module context for the rule.
 -}
 type alias ModuleContext =
-    { extractSourceCode : Range -> String }
+    { extractSourceCode : Range -> String
+    , lookupTable : ModuleNameLookupTable
+    }
 
 
 {-| Create an initial context with source code extractor.
@@ -175,8 +178,9 @@ type alias ModuleContext =
 initialContext : Rule.ContextCreator () ModuleContext
 initialContext =
     Rule.initContextCreator
-        (\extractSourceCode () -> { extractSourceCode = extractSourceCode })
+        (\extractSourceCode lookupTable () -> { extractSourceCode = extractSourceCode, lookupTable = lookupTable })
         |> Rule.withSourceCodeExtractor
+        |> Rule.withModuleNameLookupTable
 
 
 {-| Configure the rule, determining how automatic fixes are generated.
@@ -764,7 +768,7 @@ checkDeclaration config d context =
                         |> Dict.fromList
                 , closestLetBlock = Nothing
                 , newBindingsSinceLastLet = Set.empty
-                , extractSourceCode = context.extractSourceCode
+                , moduleContext = context
                 }
                 expression
 
@@ -781,7 +785,7 @@ checkDeclaration config d context =
     i.e. the one most closely "above" in the AST.
   - `newBindingsSinceLastLet` -- All new bindings added since the last `let`
     block (that could cause a name clash if a new name were added at the `let`).
-  - `extractSourceCode` -- Source code extractor.
+  - `moduleContext` -- The module context.
 
 -}
 type alias LocalContext =
@@ -792,7 +796,7 @@ type alias LocalContext =
             , letBlock : LetBlock
             }
     , newBindingsSinceLastLet : Set String
-    , extractSourceCode : Range -> String
+    , moduleContext : ModuleContext
     }
 
 
@@ -1232,5 +1236,5 @@ would become
 replaceCaseBlockWithExpression : SinglePatternCase -> Fix
 replaceCaseBlockWithExpression { context, singleExpression, range } =
     Node.range singleExpression
-        |> context.extractSourceCode
+        |> context.moduleContext.extractSourceCode
         |> Fix.replaceRangeBy range
