@@ -9,6 +9,16 @@ module NoSinglePatternCase exposing
 {-|
 
 
+## Notes
+
+It is recommended that you also include
+[`NoUnused.Patterns`](https://package.elm-lang.org/packages/jfmengels/elm-review-unused/latest/NoUnused-Patterns/)
+in your config, as the fixes for this rule can sometimes generate nested `as`
+patterns in very complex cases (e.g. when nested single-pattern cases are
+simplified). These cases cannot be resolved automatically, as it is unclear
+which name should be preferred.
+
+
 ## Review Rule
 
 @docs rule
