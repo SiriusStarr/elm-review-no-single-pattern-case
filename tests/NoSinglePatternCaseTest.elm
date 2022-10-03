@@ -1632,7 +1632,7 @@ unpack { o } =
     i
 """
                         ]
-                        , test "fall back due to name clash clash in pattern" <|
+        , test "fall back due to name clash clash in pattern" <|
             \() ->
                 """module A exposing (..)
 
