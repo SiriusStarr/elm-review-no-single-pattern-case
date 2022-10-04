@@ -2,11 +2,11 @@ module Util exposing
     ( Binding
     , Either(..)
     , allBindingsInPattern
-    , allBindingsUsedInExpression
     , allNamesInPattern
     , countUsesIn
     , either3
     , nameUsedOutsideExprs
+    , namesUsedInExpression
     , reindent
     , subexpressions
     )
@@ -116,8 +116,8 @@ subexpressions e =
 
 {-| Get a set of all (unqualified) bindings used in an expression.
 -}
-allBindingsUsedInExpression : Node Expression -> Set String
-allBindingsUsedInExpression expr =
+namesUsedInExpression : Node Expression -> Set String
+namesUsedInExpression expr =
     case Node.value expr of
         -- If the name is qualified, it isn't a variable
         FunctionOrValue [] n ->
@@ -126,7 +126,7 @@ allBindingsUsedInExpression expr =
         _ ->
             subexpressions expr
                 -- Map and accumulate in one pass
-                |> List.foldl (\e -> Set.union (allBindingsUsedInExpression <| e)) Set.empty
+                |> List.foldl (\e -> Set.union (namesUsedInExpression e)) Set.empty
 
 
 {-| Combine two dictionaries. If there is a collision, a combining function is

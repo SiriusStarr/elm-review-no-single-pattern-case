@@ -73,7 +73,8 @@ import Util
         , allBindingsUsedInExpression
         , countUsesIn
         , either3
-        , nameUsedOutsideExpr
+        , nameUsedOutsideExprs
+        , namesUsedInExpression
         , reindent
         , subexpressions
         )
