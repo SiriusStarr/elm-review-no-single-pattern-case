@@ -1074,20 +1074,18 @@ moveCasePatternToBinding ({ context, singlePattern } as info) { patternNodeRange
 {-| Remove all bindings that are in the `case...of` expression that are not used
 elsewhere else.
 -}
-fixUselessBindings : SinglePatternCase -> List Fix
-fixUselessBindings { caseExpression, context } =
-    allBindingsUsedInExpression caseExpression
-        |> (\bs -> DictX.keepOnly bs context.bindings)
-        |> Dict.filter
-            (\name { canDestructureAt, scope } ->
-                canDestructureAt
-                    && not (nameUsedOutsideExpr name caseExpression scope)
+fixUselessBindings : List { isUnit : Bool, binding : Binding } -> List Fix
+fixUselessBindings =
+    List.map
+        (\{ isUnit, binding } ->
+            (if isUnit then
+                "()"
+
+             else
+                "_"
             )
-        |> Dict.values
-        |> List.map
-            (\{ patternNodeRange } ->
-                Fix.replaceRangeBy patternNodeRange "_"
-            )
+                |> Fix.replaceRangeBy binding.patternNodeRange
+        )
 
 
 {-| Given context, an expression in a `case...of`, and a single case pattern and
