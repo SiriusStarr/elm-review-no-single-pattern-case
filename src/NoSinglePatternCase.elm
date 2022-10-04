@@ -69,11 +69,13 @@ import Set exposing (Set)
 import Util
     exposing
         ( Binding
+        , Destructuring
         , bindingsInPattern
         , either3
         , nameClash
         , nameUsedOutsideExprs
         , namesUsedInExpression
+        , reduceDestructuring
         , reindent
         , subexpressions
         )
@@ -838,15 +840,24 @@ checkExpression config ({ bindings } as context) expressionNode =
         CaseExpression caseBlock ->
             (case caseBlock.cases of
                 [ ( p, e ) ] ->
-                    singlePatternCaseError config
-                        { context = context
-                        , caseExpression = caseBlock.expression
-                        , singlePattern = p
-                        , singleExpression = e
-                        , range = Node.range expressionNode
+                    reduceDestructuring
+                        { bindings = context.bindings
+                        , lookupTable = context.moduleContext.lookupTable
+                        , outputExpression = e
                         }
-                        :: -- Add pattern match bindings
-                           go Nothing (bindingsInPattern e p) e
+                        p
+                        caseBlock.expression
+                        |> (\destructuring ->
+                                { context = context
+                                , outputExpression = e
+                                , caseRange = Node.range expressionNode
+                                , destructuring = destructuring
+                                , errorRange = Node.range p
+                                }
+                           )
+                        |> singlePatternCaseError config
+                        -- Add pattern match bindings and descend into output expression
+                        |> (\err -> err :: go Nothing (bindingsInPattern e p) e)
 
                 multipleCases ->
                     multipleCases
@@ -914,21 +925,20 @@ checkExpression config ({ bindings } as context) expressionNode =
 
 {-| Information about a detected single-pattern case.
 
+  - `destructuring` -- The fully-reduced destructuring occurring in the case.
   - `context` -- The local context the expression exists in (bindings, closest
     `let` block. etc.)
-  - `caseExpression` -- The expression between `case` and `of`, i.e. the
-    expression being pattern matched on.
-  - `singlePattern` -- The single pattern match.
-  - `singleExpression` -- The expression output by the single pattern.
-  - `range` -- The `Range` of the entire case expression.
+  - `outputExpression` -- The expression output by the single pattern.
+  - `caseRange` -- The `Range` of the entire case expression.
+  - `errorRange` -- The `Range` to report the error at.
 
 -}
 type alias SinglePatternCase =
-    { context : LocalContext
-    , caseExpression : Node Expression
-    , singlePattern : Node Pattern
-    , singleExpression : Node Expression
-    , range : Range
+    { destructuring : Destructuring
+    , context : LocalContext
+    , outputExpression : Node Expression
+    , caseRange : Range
+    , errorRange : Range
     }
 
 
@@ -1251,7 +1261,7 @@ would become
 
 -}
 replaceCaseBlockWithExpression : SinglePatternCase -> Fix
-replaceCaseBlockWithExpression { context, singleExpression, range } =
-    Node.range singleExpression
+replaceCaseBlockWithExpression { context, outputExpression, caseRange } =
+    Node.range outputExpression
         |> context.moduleContext.extractSourceCode
-        |> Fix.replaceRangeBy range
+        |> Fix.replaceRangeBy caseRange
