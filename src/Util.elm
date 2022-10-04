@@ -1,9 +1,7 @@
 module Util exposing
     ( Binding
     , Either(..)
-    , allBindingsInPattern
-    , allNamesInPattern
-    , countUsesIn
+    , bindingsInPattern
     , either3
     , nameUsedOutsideExprs
     , namesUsedInExpression
@@ -156,12 +154,12 @@ dictUnionWith f d1 d2 =
 destructuring could occur at the pattern. Requires scope information to actually
 create the binding.
 -}
-allNamesInPattern : Node Pattern -> List ( String, Node Expression -> Binding )
-allNamesInPattern pattern =
+namesInPattern : Node Pattern -> List ( String, Node Expression -> Binding )
+namesInPattern pattern =
     let
         go : List (Node Pattern) -> List ( String, Node Expression -> Binding )
         go =
-            List.concatMap allNamesInPattern
+            List.concatMap namesInPattern
 
         makeBinding : Bool -> Node String -> ( String, Node Expression -> Binding )
         makeBinding canDestructureAt name =
@@ -230,9 +228,9 @@ allNamesInPattern pattern =
 {-| Recursively find all bindings in a pattern and save whether or not
 destructuring could occur at the pattern.
 -}
-allBindingsInPattern : Node Expression -> Node Pattern -> List ( String, Binding )
-allBindingsInPattern scope =
-    allNamesInPattern
+bindingsInPattern : Node Expression -> Node Pattern -> List ( String, Binding )
+bindingsInPattern scope =
+    namesInPattern
         >> List.map (Tuple.mapSecond (\f -> f scope))
 
 

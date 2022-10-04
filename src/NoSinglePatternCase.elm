@@ -69,9 +69,7 @@ import Set exposing (Set)
 import Util
     exposing
         ( Binding
-        , allBindingsInPattern
-        , allBindingsUsedInExpression
-        , countUsesIn
+        , bindingsInPattern
         , either3
         , nameUsedOutsideExprs
         , namesUsedInExpression
@@ -765,7 +763,7 @@ checkDeclaration config d context =
             in
             checkExpression config
                 { bindings =
-                    List.concatMap (allBindingsInPattern expression) arguments
+                    List.concatMap (bindingsInPattern expression) arguments
                         |> Dict.fromList
                 , closestLetBlock = Nothing
                 , newBindingsSinceLastLet = Set.empty
@@ -847,14 +845,14 @@ checkExpression config ({ bindings } as context) expressionNode =
                         , range = Node.range expressionNode
                         }
                         :: -- Add pattern match bindings
-                           go Nothing (allBindingsInPattern e p) e
+                           go Nothing (bindingsInPattern e p) e
 
                 multipleCases ->
                     multipleCases
                         |> List.concatMap
                             (\( p, e ) ->
                                 -- Add pattern match bindings
-                                go Nothing (allBindingsInPattern e p) e
+                                go Nothing (bindingsInPattern e p) e
                             )
             )
                 ++ -- Check expression in case...of as well
@@ -877,14 +875,14 @@ checkExpression config ({ bindings } as context) expressionNode =
                                   }
                                 )
                               ]
-                            , List.concatMap (allBindingsInPattern expression) arguments
+                            , List.concatMap (bindingsInPattern expression) arguments
                                 |> (\args bs ->
                                         go (Just lB) (args ++ bs) expression
                                    )
                             )
 
                         LetDestructuring pattern expr ->
-                            ( allBindingsInPattern expressionNode pattern
+                            ( bindingsInPattern expressionNode pattern
                             , \bs -> go (Just lB) bs expr
                             )
 
@@ -903,7 +901,7 @@ checkExpression config ({ bindings } as context) expressionNode =
 
         LambdaExpression { args, expression } ->
             -- Add arg bindings
-            List.concatMap (allBindingsInPattern expression) args
+            List.concatMap (bindingsInPattern expression) args
                 |> (\bs ->
                         go Nothing bs expression
                    )
