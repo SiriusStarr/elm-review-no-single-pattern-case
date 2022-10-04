@@ -71,6 +71,7 @@ import Util
         ( Binding
         , bindingsInPattern
         , either3
+        , nameClash
         , nameUsedOutsideExprs
         , namesUsedInExpression
         , reindent

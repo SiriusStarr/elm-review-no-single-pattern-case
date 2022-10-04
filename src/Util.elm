@@ -3,6 +3,7 @@ module Util exposing
     , Either(..)
     , bindingsInPattern
     , either3
+    , nameClash
     , nameUsedOutsideExprs
     , namesUsedInExpression
     , reindent
@@ -325,6 +326,40 @@ expressions.
 nameUsedOutsideExprs : String -> { inside : List (Node Expression), scope : Node Expression } -> Bool
 nameUsedOutsideExprs name { inside, scope } =
     countUsesIn scope name > List.foldl (\e acc -> acc + countUsesIn e name) 0 inside
+
+
+{-| Given some number of inner expression and an outer expression, and a list of
+inner patterns, report all names bound in the patterns that are used in the
+outer expression exclusive of the inner expressions or the patterns themselves.
+-}
+nameClash : { insideExpr : List (Node Expression), scope : Node Expression } -> List (Node Pattern) -> Bool
+nameClash { insideExpr, scope } ps =
+    let
+        innerUses : Dict String Int
+        innerUses =
+            List.map nameAppearancesInExpression insideExpr
+                |> List.foldl (dictUnionWith (+)) patternUses
+
+        patternUses : Dict String Int
+        patternUses =
+            List.map nameAppearancesInPattern ps
+                |> List.foldl (dictUnionWith (+)) Dict.empty
+
+        outerUses : Dict String Int
+        outerUses =
+            nameAppearancesInExpression scope
+    in
+    DictX.any
+        (\n _ ->
+            Maybe.map2
+                (\outerCount innerCount ->
+                    outerCount > innerCount
+                )
+                (Dict.get n outerUses)
+                (Dict.get n innerUses)
+                |> Maybe.withDefault False
+        )
+        patternUses
 
 
 {-| A binding with some scope.
