@@ -933,6 +933,23 @@ type alias SinglePatternCase =
     }
 
 
+{-| A binding that can be directly destructured at.
+
+  - `requiredAsName` -- The `as` pattern required when replacing the binding, if
+    any.
+  - `binding` -- The `Binding` at which destructuring can occur.
+  - `fallbackExpression` -- The original expression from which this binding was
+    generated, in case we want to destructure that instead of replacing the
+    binding.
+
+-}
+type alias DestructurableBinding =
+    { requiredAsName : Maybe String
+    , binding : Binding
+    , fallbackExpression : Node Expression
+    }
+
+
 {-| An error for when a case expression only contains one case pattern. See [`Config`](NoSinglePatternCase#Config) for how fixes will be generated.
 -}
 singlePatternCaseError : Config fixBy -> SinglePatternCase -> Error {}
