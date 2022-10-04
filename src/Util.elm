@@ -14,6 +14,7 @@ module Util exposing
 {-| General utility functions not directly related to the specific rule.
 -}
 
+import Dict exposing (Dict)
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern(..))
@@ -126,6 +127,29 @@ allBindingsUsedInExpression expr =
             subexpressions expr
                 -- Map and accumulate in one pass
                 |> List.foldl (\e -> Set.union (allBindingsUsedInExpression <| e)) Set.empty
+
+
+{-| Combine two dictionaries. If there is a collision, a combining function is
+used to combine the two values.
+
+Note that, like `Dict.union`, it is more efficient to have the larger `Dict` as
+the second argument, i.e. when possible, you should use `unionWith f new old`,
+if `old` has more keys than `new`.
+
+-}
+dictUnionWith : (a -> a -> a) -> Dict comparable a -> Dict comparable a -> Dict comparable a
+dictUnionWith f d1 d2 =
+    Dict.foldl
+        (\k v1 acc ->
+            case Dict.get k acc of
+                Just v2 ->
+                    Dict.insert k (f v1 v2) acc
+
+                Nothing ->
+                    Dict.insert k v1 acc
+        )
+        d2
+        d1
 
 
 {-| Recursively find all names used in a pattern and save whether or not
