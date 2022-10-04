@@ -1,5 +1,6 @@
 module Util exposing
     ( Binding
+    , Destructuring
     , Either(..)
     , bindingsInPattern
     , either3
@@ -126,6 +127,25 @@ namesUsedInExpression expr =
             subexpressions expr
                 -- Map and accumulate in one pass
                 |> List.foldl (\e -> Set.union (namesUsedInExpression e)) Set.empty
+
+
+{-| `Destructuring` represents a fully-reduced case expression.
+
+  - `removableBindings` -- These are bindings that are used in removable parts of
+    the `case...of` expression but nowhere else and can thus be safely replaced
+    with `_`.
+  - `usefulPatterns` -- These are actually necessery patterns (i.e. those that
+    bind names used in the output expression), along with the expression they
+    directly destructure.
+  - `removedExpressions` -- These are expressions that will be removed when the
+    `case` is rewritten, so we can ignore the use of anything in them.
+
+-}
+type alias Destructuring =
+    { removableBindings : List { isUnit : Bool, binding : Binding }
+    , usefulPatterns : List ( Node Pattern, Node Expression )
+    , removedExpressions : List (Node Expression)
+    }
 
 
 {-| Combine two dictionaries. If there is a collision, a combining function is
