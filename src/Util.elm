@@ -150,6 +150,71 @@ dictUnionWith f d1 d2 =
         d1
 
 
+{-| Get a count for all names that are bound in a pattern, and the number of
+times they are bound (which is always 1, but it's returned this way for ease of
+combining with counts from expressions).
+-}
+nameAppearancesInPattern : Node Pattern -> Dict String Int
+nameAppearancesInPattern p =
+    -- Add pattern bindings, assuming names can't be bound more than once within a pattern (since they can't)
+    namesInPattern p
+        |> List.map (Tuple.mapSecond (always 1))
+        |> Dict.fromList
+
+
+{-| Given an expression, count every unqualified name that is bound or
+referenced in it and the number of times it is bound and/or referenced.
+-}
+nameAppearancesInExpression : Node Expression -> Dict String Int
+nameAppearancesInExpression expressionNode =
+    let
+        go : Node Expression -> Dict String Int
+        go =
+            nameAppearancesInExpression
+    in
+    case Node.value expressionNode of
+        -- If the name is qualified, it isn't a variable
+        FunctionOrValue [] n ->
+            Dict.singleton n 1
+
+        CaseExpression { cases, expression } ->
+            List.map
+                (\( p, e ) ->
+                    nameAppearancesInPattern p
+                        |> dictUnionWith (+) (go e)
+                )
+                cases
+                |> List.foldl (dictUnionWith (+)) (go expression)
+
+        LetExpression lB ->
+            let
+                bindingsFromDec : Node LetDeclaration -> Dict String Int
+                bindingsFromDec d =
+                    case Node.value d of
+                        LetFunction fun ->
+                            let
+                                { name, expression, arguments } =
+                                    Node.value fun.declaration
+                            in
+                            List.map nameAppearancesInPattern arguments
+                                |> List.foldl (dictUnionWith (+)) (Dict.singleton (Node.value name) 1)
+                                |> dictUnionWith (+) (go expression)
+
+                        LetDestructuring pattern expr ->
+                            nameAppearancesInPattern pattern
+                                |> dictUnionWith (+) (go expr)
+            in
+            List.foldl (dictUnionWith (+) << bindingsFromDec) (go lB.expression) lB.declarations
+
+        LambdaExpression { args, expression } ->
+            List.map nameAppearancesInPattern args
+                |> List.foldl (dictUnionWith (+)) (go expression)
+
+        _ ->
+            subexpressions expressionNode
+                |> List.foldl (\e -> dictUnionWith (+) (go e)) Dict.empty
+
+
 {-| Recursively find all names used in a pattern and save whether or not
 destructuring could occur at the pattern. Requires scope information to actually
 create the binding.
