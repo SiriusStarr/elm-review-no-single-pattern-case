@@ -962,29 +962,13 @@ type alias DestructurableBinding =
 {-| An error for when a case expression only contains one case pattern. See [`Config`](NoSinglePatternCase#Config) for how fixes will be generated.
 -}
 singlePatternCaseError : Config fixBy -> SinglePatternCase -> Error {}
-singlePatternCaseError ((Config { replaceUseless }) as config) info =
-    (-- Check for useless cases.  This is also caught by `elm-review-simplify`,
-     -- but we'll handle it in case they don't have that in their review config.
-     if
-        allBindingsInPattern info.singleExpression info.singlePattern
-            |> List.all ((==) 0 << countUsesIn info.singleExpression << Tuple.first)
-     then
-        replaceCaseBlockWithExpression info
-            :: (if replaceUseless then
-                    fixUselessBindings info
-
-                else
-                    []
-               )
-
-     else
-        makeFix config info
-    )
+singlePatternCaseError config info =
+    makeFix config info
         |> Rule.errorWithFix
             { message = "Single pattern case block."
             , details = [ "Single pattern case blocks typically are either unnecessary or overly verbose.  There's usually a more concise way to destructure, e.g. in a function argument, so consider refactoring." ]
             }
-            (Node.range info.singlePattern)
+            info.errorRange
 
 
 {-| Given config and info about a single pattern case, try to create a fix per
