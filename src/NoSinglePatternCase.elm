@@ -1056,6 +1056,41 @@ makeFix (Config { fixBy }) ({ context, caseExpression, singleExpression, singleP
                 }
 
 
+{-| Given a list of patterns and their locations to destructure at, partition
+them into those whose binding sites do not overlap and those that would conflict
+with each other.
+-}
+checkForCollidingBindings : List ( Node Pattern, DestructurableBinding ) -> ( List ( Node Pattern, DestructurableBinding ), List (List ( Node Pattern, Node Expression )) )
+checkForCollidingBindings =
+    let
+        overlaps : Range -> Range -> Bool
+        overlaps r1 r2 =
+            -- Check if the two binding ranges overlap at all
+            if Range.compareLocations r1.end r2.start == LT then
+                False
+
+            else
+                Range.compareLocations r2.end r1.start /= LT
+
+        go : ( List ( Node Pattern, DestructurableBinding ), List (List ( Node Pattern, Node Expression )) ) -> List ( Node Pattern, DestructurableBinding ) -> ( List ( Node Pattern, DestructurableBinding ), List (List ( Node Pattern, Node Expression )) )
+        go ( cleared, collided ) remaining =
+            case remaining of
+                [] ->
+                    ( List.reverse cleared, List.reverse collided )
+
+                (( _, currBinding ) as b) :: bs ->
+                    case
+                        List.partition (\( _, { binding } ) -> overlaps binding.patternNodeRange currBinding.binding.patternNodeRange) bs
+                    of
+                        ( [], uncollided ) ->
+                            go ( b :: cleared, collided ) uncollided
+
+                        ( collisions, uncollided ) ->
+                            go ( cleared, List.map (Tuple.mapSecond .fallbackExpression) (b :: collisions) :: collided ) uncollided
+    in
+    go ( [], [] )
+
+
 {-| Given local context, a pattern node, and a binding to destructure at,
 generate a fix that destructures at the binding. This function does not check if
 this is possible, and should only be called after
