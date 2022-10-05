@@ -979,9 +979,9 @@ makeFix (Config { fixBy, replaceUseless }) ({ destructuring } as info) =
     let
         destructureInLet :
             { ifNoLetBlock : Either (Either CreateNewLet noLetFix) Fail
-            , noLetFix : noLetFix -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
+            , noLetFix : noLetFix -> List ( Node Pattern, Node Expression ) -> Maybe (List Fix)
             }
-            -> Nonempty ( Node Pattern, Node Expression )
+            -> List ( Node Pattern, Node Expression )
             -> Maybe (List Fix)
         destructureInLet { ifNoLetBlock, noLetFix } ps =
             let
@@ -1003,11 +1003,11 @@ makeFix (Config { fixBy, replaceUseless }) ({ destructuring } as info) =
                 , noLetFixes
                 ]
 
-        useNewLet : CreateNewLet -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
+        useNewLet : CreateNewLet -> List ( Node Pattern, Node Expression ) -> Maybe (List Fix)
         useNewLet CreateNewLet =
             Just << moveDestructuringsToNewLetBlock info
 
-        fallbackToArg : UseArgInstead -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
+        fallbackToArg : UseArgInstead -> List ( Node Pattern, Node Expression ) -> Maybe (List Fix)
         fallbackToArg (UseArgInstead { ifAsPatternNeeded, ifCannotDestructure }) =
             destructureInArg
                 { asPatternAlternative = useNewLet
@@ -1016,18 +1016,18 @@ makeFix (Config { fixBy, replaceUseless }) ({ destructuring } as info) =
                 , cannotDestructureFix = useNewLet
                 }
 
-        orFail : Fail -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
+        orFail : Fail -> List ( Node Pattern, Node Expression ) -> Maybe (List Fix)
         orFail Fail _ =
             Nothing
 
-        fallbackToLet : (noLetFix -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)) -> UseLetInstead (Either (Either CreateNewLet noLetFix) Fail) -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
+        fallbackToLet : (noLetFix -> List ( Node Pattern, Node Expression ) -> Maybe (List Fix)) -> UseLetInstead (Either (Either CreateNewLet noLetFix) Fail) -> List ( Node Pattern, Node Expression ) -> Maybe (List Fix)
         fallbackToLet noLetFix (UseLetInstead { ifNoLetBlock }) =
             destructureInLet
                 { ifNoLetBlock = ifNoLetBlock
                 , noLetFix = noLetFix
                 }
 
-        orUseAsPattern : UseAsPattern -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
+        orUseAsPattern : UseAsPattern -> List ( Node Pattern, Node Expression ) -> Maybe (List Fix)
         orUseAsPattern UseAsPattern ps =
             let
                 { fixedInArg, useAsFallback, notDestructurable } =
@@ -1044,12 +1044,12 @@ makeFix (Config { fixBy, replaceUseless }) ({ destructuring } as info) =
                     Nothing
 
         destructureInArg :
-            { asPatternAlternative : asPatternAlternative -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
+            { asPatternAlternative : asPatternAlternative -> List ( Node Pattern, Node Expression ) -> Maybe (List Fix)
             , ifAsPatternNeeded : UseAsPatternOrFailOr asPatternAlternative
             , ifCannotDestructure : Either (Either destructureFallback Fail) Fail
-            , cannotDestructureFix : destructureFallback -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
+            , cannotDestructureFix : destructureFallback -> List ( Node Pattern, Node Expression ) -> Maybe (List Fix)
             }
-            -> Nonempty ( Node Pattern, Node Expression )
+            -> List ( Node Pattern, Node Expression )
             -> Maybe (List Fix)
         destructureInArg { asPatternAlternative, ifAsPatternNeeded, ifCannotDestructure, cannotDestructureFix } ps =
             let
@@ -1086,36 +1086,36 @@ makeFix (Config { fixBy, replaceUseless }) ({ destructuring } as info) =
                 , notDestructurableFixes
                 ]
 
-        fixRemaining : (Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)) -> List ( Node Pattern, Node Expression ) -> Maybe (List Fix)
-        fixRemaining fallback =
-            NE.fromList
-                >> MaybeX.unwrap (Just []) fallback
+        fixRemaining : (List ( Node Pattern, Node Expression ) -> Maybe (List Fix)) -> List ( Node Pattern, Node Expression ) -> Maybe (List Fix)
+        fixRemaining fallback ps =
+            if List.isEmpty ps then
+                Just []
+
+            else
+                fallback ps
 
         combineFixes : List (Maybe (List Fix)) -> Maybe (List Fix)
         combineFixes =
             MaybeX.combine
                 >> Maybe.map List.concat
     in
-    NE.fromList destructuring.usefulPatterns
-        |> MaybeX.unwrap (Just [])
-            (\patterns ->
-                case fixBy of
-                    DestructureInLet { ifNoLetBlock } ->
-                        destructureInLet
-                            { noLetFix = fallbackToArg
-                            , ifNoLetBlock = ifNoLetBlock
-                            }
-                            patterns
+    (case fixBy of
+        DestructureInLet { ifNoLetBlock } ->
+            destructureInLet
+                { noLetFix = fallbackToArg
+                , ifNoLetBlock = ifNoLetBlock
+                }
+                destructuring.usefulPatterns
 
-                    DestructureInArgument { ifAsPatternNeeded, ifCannotDestructure } ->
-                        destructureInArg
-                            { asPatternAlternative = fallbackToLet orUseAsPattern
-                            , ifAsPatternNeeded = ifAsPatternNeeded
-                            , ifCannotDestructure = ifCannotDestructure
-                            , cannotDestructureFix = fallbackToLet orFail
-                            }
-                            patterns
-            )
+        DestructureInArgument { ifAsPatternNeeded, ifCannotDestructure } ->
+            destructureInArg
+                { asPatternAlternative = fallbackToLet orUseAsPattern
+                , ifAsPatternNeeded = ifAsPatternNeeded
+                , ifCannotDestructure = ifCannotDestructure
+                , cannotDestructureFix = fallbackToLet orFail
+                }
+                destructuring.usefulPatterns
+    )
         |> Maybe.map
             (\fs ->
                 (if replaceUseless then
@@ -1130,14 +1130,14 @@ makeFix (Config { fixBy, replaceUseless }) ({ destructuring } as info) =
         |> MaybeX.unwrap [] ((::) (replaceCaseBlockWithExpression info))
 
 
-{-| Given a `SinglePatternCase` and a non-empty list of patterns and expressions
-to destructure in the closest existing `let` block, return a list of fixes
-moving patterns to that `let` (or `Nothing` if that failed) as well as any
-remaining patterns that could not be fixed in it.
+{-| Given a `SinglePatternCase` and a list of patterns and expressions to
+destructure in the closest existing `let` block, return a list of fixes moving
+patterns to that `let` (or `Nothing` if that failed) as well as any remaining
+patterns that could not be fixed in it.
 -}
 destructureInExistingLet :
     SinglePatternCase
-    -> Nonempty ( Node Pattern, Node Expression )
+    -> List ( Node Pattern, Node Expression )
     ->
         { fixedInLet : Maybe (List Fix)
         , noSuitableLetExists : List ( Node Pattern, Node Expression )
@@ -1159,16 +1159,15 @@ destructureInExistingLet ({ context } as info) patterns =
 
 
 {-| Given a `SinglePatternCase`, whether or not to use `as` patterns if
-necessary, and a non-empty list of patterns and expressions to destructure at
-the bindings of (if possible), return a list of fixes destructuring patterns at
-bindings, as well as any patterns that needed `as` patterns (if told not to use
-them), and any remaining patterns that could not be destructured in this
-fashion.
+necessary, and a list of patterns and expressions to destructure at the bindings
+of (if possible), return a list of fixes destructuring patterns at bindings, as
+well as any patterns that needed `as` patterns (if told not to use them), and
+any remaining patterns that could not be destructured in this fashion.
 -}
 destructureAtBindings :
     SinglePatternCase
     -> Bool
-    -> Nonempty ( Node Pattern, Node Expression )
+    -> List ( Node Pattern, Node Expression )
     ->
         { fixedInArg : Maybe (List Fix)
         , useAsFallback : List ( Node Pattern, DestructurableBinding )
@@ -1179,7 +1178,7 @@ destructureAtBindings { context, destructuring, outputExpression } destructureUs
         { canDestructure, cannotDestructure } =
             let
                 ( can, cannot ) =
-                    NE.toList patterns
+                    patterns
                         |> List.map
                             (\( p, e ) ->
                                 getValidDestructurableBinding context
@@ -1349,47 +1348,59 @@ getValidDestructurableBinding { bindings } { pattern, destructuredExpression, ig
             )
 
 
-{-| Given context, a `LetBlock`, and a non-empty list of patterns and
-expressions to destructure, destructure them at the end of the `LetBlock`.
+{-| Given context, a `LetBlock`, and a list of patterns and expressions to
+destructure, destructure them at the end of the `LetBlock`.
 -}
-moveDestructuringsToExistingLetBlock : ModuleContext -> LetBlock -> Nonempty ( Node Pattern, Node Expression ) -> List Fix
+moveDestructuringsToExistingLetBlock : ModuleContext -> LetBlock -> List ( Node Pattern, Node Expression ) -> List Fix
 moveDestructuringsToExistingLetBlock moduleContext { declarations } ps =
-    let
-        oldDeclarationRange : Range
-        oldDeclarationRange =
-            List.map Node.range declarations
-                |> Range.combine
-    in
-    [ makeLetDecs moduleContext (oldDeclarationRange.start.column - 1) ps
-        |> (\ds -> "\n\n" ++ ds)
-        |> Fix.insertAt oldDeclarationRange.end
-    ]
+    if List.isEmpty ps then
+        -- Don't bother fixing empty lists; this should be prevented up-stream,
+        -- but better safe than sorry
+        []
+
+    else
+        let
+            oldDeclarationRange : Range
+            oldDeclarationRange =
+                List.map Node.range declarations
+                    |> Range.combine
+        in
+        [ makeLetDecs moduleContext (oldDeclarationRange.start.column - 1) ps
+            |> (\ds -> "\n\n" ++ ds)
+            |> Fix.insertAt oldDeclarationRange.end
+        ]
 
 
-{-| Given a single pattern case and a non-empty list of patterns and expressions
-to destructure, create a new `let` to destructure them in.
+{-| Given a single pattern case and a list of patterns and expressions to
+destructure, create a new `let` to destructure them in.
 -}
-moveDestructuringsToNewLetBlock : SinglePatternCase -> Nonempty ( Node Pattern, Node Expression ) -> List Fix
+moveDestructuringsToNewLetBlock : SinglePatternCase -> List ( Node Pattern, Node Expression ) -> List Fix
 moveDestructuringsToNewLetBlock { caseRange, context } ps =
-    -- Leading spaces here are so that we leave an empty, indented line at for
-    -- when we replace the expression later
-    [ [ " let"
-      , makeLetDecs context.moduleContext 5 ps
-      , " in"
-      , " "
-      ]
-        |> String.join "\n"
-        |> reindent (caseRange.start.column - 1)
-        |> Fix.insertAt caseRange.start
-    ]
+    if List.isEmpty ps then
+        -- Don't bother fixing empty lists; this should be prevented up-stream,
+        -- but better safe than sorry
+        []
+
+    else
+        -- Leading spaces here are so that we leave an empty, indented line at for
+        -- when we replace the expression later
+        [ [ " let"
+          , makeLetDecs context.moduleContext 5 ps
+          , " in"
+          , " "
+          ]
+            |> String.join "\n"
+            |> reindent (caseRange.start.column - 1)
+            |> Fix.insertAt caseRange.start
+        ]
 
 
-{-| Given context, an indent amount, and a non-empty list of patterns and
-expressions to destructure, create `let` declarations that destructure them.
+{-| Given context, an indent amount, and a list of patterns and expressions to
+destructure, create `let` declarations that destructure them.
 -}
-makeLetDecs : ModuleContext -> Int -> Nonempty ( Node Pattern, Node Expression ) -> String
+makeLetDecs : ModuleContext -> Int -> List ( Node Pattern, Node Expression ) -> String
 makeLetDecs { extractSourceCode } letIndentAmt =
-    NE.map
+    List.map
         (\( pat, expr ) ->
             let
                 e : String
@@ -1412,31 +1423,30 @@ makeLetDecs { extractSourceCode } letIndentAmt =
                 , e
                 ]
         )
-        >> NE.toList
         >> String.join "\n\n"
 
 
-{-| Given a `SinglePaternCase` and a non-empty list of patterns/expressions to
+{-| Given a `SinglePaternCase` and a list of patterns/expressions to
 destructure, get the closest `let` block to destructure in and return those that
 can be destructured there and those that can't. This requires all names in
 expression to be in scope in the `let` and checks for name clashes in the
 pattern to be moved.
 -}
-getValidLetBlock : SinglePatternCase -> Nonempty ( Node Pattern, Node Expression ) -> { hasValidLet : Maybe ( LetBlock, Nonempty ( Node Pattern, Node Expression ) ), lacksValidLet : List ( Node Pattern, Node Expression ) }
+getValidLetBlock : SinglePatternCase -> List ( Node Pattern, Node Expression ) -> { hasValidLet : Maybe ( LetBlock, List ( Node Pattern, Node Expression ) ), lacksValidLet : List ( Node Pattern, Node Expression ) }
 getValidLetBlock { context, destructuring, outputExpression } ps =
     case context.closestLetBlock of
         Nothing ->
             { hasValidLet = Nothing
-            , lacksValidLet = NE.toList ps
+            , lacksValidLet = ps
             }
 
         Just { expression, letBlock } ->
             let
                 ignorableExpressions : List (Node Expression)
                 ignorableExpressions =
-                    outputExpression :: destructuring.removedExpressions ++ NE.toList (NE.map Tuple.second ps)
+                    outputExpression :: destructuring.removedExpressions ++ List.map Tuple.second ps
             in
-            NE.toList ps
+            ps
                 |> List.foldr
                     (\( p, e ) ( hasLetAcc, noLetAcc ) ->
                         if
@@ -1464,7 +1474,12 @@ getValidLetBlock { context, destructuring, outputExpression } ps =
                     )
                     ( [], [] )
                 |> (\( has, lacks ) ->
-                        { hasValidLet = Maybe.map (Tuple.pair letBlock) <| NE.fromList has
+                        { hasValidLet =
+                            if List.isEmpty has then
+                                Nothing
+
+                            else
+                                Just <| Tuple.pair letBlock has
                         , lacksValidLet = lacks
                         }
                    )
