@@ -7,6 +7,7 @@ module Util exposing
     , nameClash
     , nameUsedOutsideExprs
     , namesUsedInExpression
+    , reduceDestructuring
     , reindent
     , subexpressions
     )
@@ -15,10 +16,14 @@ module Util exposing
 -}
 
 import Dict exposing (Dict)
-import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..))
+import Dict.Extra as DictX
+import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..), RecordSetter)
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern(..))
 import Elm.Syntax.Range exposing (Range)
+import List.Extra as ListX
+import Maybe.Extra as MaybeX
+import Review.ModuleNameLookupTable as ModuleNameLookupTable exposing (ModuleNameLookupTable)
 import Set exposing (Set)
 
 
@@ -146,6 +151,320 @@ type alias Destructuring =
     , usefulPatterns : List ( Node Pattern, Node Expression )
     , removedExpressions : List (Node Expression)
     }
+
+
+{-| Given a pattern and the expression it destructures, reduce them to their
+simplest forms.
+-}
+reduceDestructuring :
+    { bindings : Dict String Binding
+    , lookupTable : ModuleNameLookupTable
+    , outputExpression : Node Expression
+    }
+    -> Node Pattern
+    -> Node Expression
+    -> Destructuring
+reduceDestructuring { bindings, outputExpression, lookupTable } pattern expression =
+    pairPatternsWithExpression lookupTable (namesUsedInExpression outputExpression) pattern expression
+        |> (\{ uselessPatterns, usefulPatterns, uselessExpressions } ->
+                let
+                    allUselessExpressions : List (Node Expression)
+                    allUselessExpressions =
+                        List.map .expression uselessPatterns ++ uselessExpressions
+                in
+                { removableBindings = removableBindings bindings allUselessExpressions uselessPatterns
+                , usefulPatterns = usefulPatterns
+                , removedExpressions = allUselessExpressions
+                }
+           )
+
+
+{-| Given a lookup table and a set of useful bound names, fully-pair patterns and
+expressions.
+-}
+pairPatternsWithExpression :
+    ModuleNameLookupTable
+    -> Set String
+    -> Node Pattern
+    -> Node Expression
+    ->
+        { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
+        , usefulPatterns : List ( Node Pattern, Node Expression )
+        , uselessExpressions : List (Node Expression)
+        }
+pairPatternsWithExpression lookupTable usedNames pat expr =
+    let
+        go :
+            Node Pattern
+            -> Node Expression
+            ->
+                { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
+                , usefulPatterns : List ( Node Pattern, Node Expression )
+                , uselessExpressions : List (Node Expression)
+                }
+        go =
+            pairPatternsWithExpression lookupTable usedNames
+
+        goMultiple :
+            List (Node Pattern)
+            -> List (Node Expression)
+            ->
+                { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
+                , usefulPatterns : List ( Node Pattern, Node Expression )
+                , uselessExpressions : List (Node Expression)
+                }
+        goMultiple ps es =
+            List.map2 go ps es
+                |> List.foldr
+                    (\{ uselessPatterns, usefulPatterns, uselessExpressions } acc ->
+                        { uselessPatterns = uselessPatterns ++ acc.uselessPatterns
+                        , usefulPatterns = usefulPatterns ++ acc.usefulPatterns
+                        , uselessExpressions = uselessExpressions ++ acc.uselessExpressions
+                        }
+                    )
+                    { uselessPatterns = []
+                    , usefulPatterns = []
+                    , uselessExpressions = []
+                    }
+
+        done :
+            Bool
+            ->
+                { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
+                , usefulPatterns : List ( Node Pattern, Node Expression )
+                , uselessExpressions : List (Node Expression)
+                }
+        done isUnit =
+            if isUseful pat then
+                -- Not useless
+                { uselessPatterns = []
+                , usefulPatterns = [ ( pat, expr ) ]
+                , uselessExpressions = []
+                }
+
+            else
+                -- Useless
+                { uselessPatterns = [ { isUnit = isUnit, pattern = pat, expression = expr } ]
+                , usefulPatterns = []
+                , uselessExpressions = []
+                }
+
+        isUseful : Node Pattern -> Bool
+        isUseful p =
+            namesInPattern p
+                |> List.any (\( name, _ ) -> Set.member name usedNames)
+    in
+    case ( Node.value pat, Node.value expr ) of
+        ( ParenthesizedPattern p, _ ) ->
+            -- Recurse if either parenthesized
+            go p expr
+
+        ( _, ParenthesizedExpression e ) ->
+            -- Recurse if either parenthesized
+            go pat e
+
+        ( AllPattern, _ ) ->
+            -- Get the binding info if it's a terminal pattern
+            done False
+
+        ( UnitPattern, _ ) ->
+            -- Get the binding info if it's a terminal pattern
+            done True
+
+        ( VarPattern _, _ ) ->
+            -- Get the binding info if it's a terminal pattern
+            done False
+
+        ( CharPattern _, _ ) ->
+            -- Get the binding info if it's a terminal pattern
+            done False
+
+        ( StringPattern _, _ ) ->
+            -- Get the binding info if it's a terminal pattern
+            done False
+
+        ( IntPattern _, _ ) ->
+            -- Get the binding info if it's a terminal pattern
+            done False
+
+        ( HexPattern _, _ ) ->
+            -- Get the binding info if it's a terminal pattern
+            done False
+
+        ( FloatPattern _, _ ) ->
+            -- Get the binding info if it's a terminal pattern
+            done False
+
+        ( _, UnitExpr ) ->
+            -- Get the binding info if it's a terminal expression
+            done True
+
+        ( _, Integer _ ) ->
+            -- Get the binding info if it's a terminal expression
+            done False
+
+        ( _, Hex _ ) ->
+            -- Get the binding info if it's a terminal expression
+            done False
+
+        ( _, Floatable _ ) ->
+            -- Get the binding info if it's a terminal expression
+            done False
+
+        ( _, Operator _ ) ->
+            -- Get the binding info if it's a terminal expression
+            done False
+
+        ( _, CharLiteral _ ) ->
+            -- Get the binding info if it's a terminal expression
+            done False
+
+        ( _, GLSLExpression _ ) ->
+            -- Get the binding info if it's a terminal expression
+            done False
+
+        ( _, Literal _ ) ->
+            -- Get the binding info if it's a terminal expression
+            done False
+
+        ( _, LambdaExpression _ ) ->
+            -- Get the binding info if it's a terminal expression
+            done False
+
+        ( UnConsPattern _ _, _ ) ->
+            -- An uncons pattern can't occur in a single-pattern case,
+            -- since there would have to always be at least the `[]`
+            -- pattern as well.
+            done False
+
+        ( ListPattern _, _ ) ->
+            -- A list pattern can't occur in a single-pattern case,
+            -- since there would have to always be an infinite length
+            -- pattern as well.
+            done False
+
+        ( AsPattern p n, _ ) ->
+            if Set.member (Node.value n) usedNames then
+                -- As pattern is used, so cannot destructure further
+                done False
+
+            else
+                -- As pattern is useless, so recurse
+                go p expr
+
+        ( TuplePattern ps, TupledExpression es ) ->
+            goMultiple ps es
+
+        ( TuplePattern _, _ ) ->
+            -- It's not worth it to try to reduce the few other cases we
+            -- potentially could here, e.g. `let...in`, because they
+            -- should almost never show up
+            done False
+
+        ( NamedPattern _ [], _ ) ->
+            -- No sub-patterns, so this is terminal
+            done False
+
+        ( NamedPattern { name } ps, Application exprs ) ->
+            ListX.uncons exprs
+                |> MaybeX.unpack (\() -> done False)
+                    (\( e, es ) ->
+                        case Node.value e of
+                            FunctionOrValue _ eName ->
+                                if
+                                    -- Confirm they are the same name and from the same module
+                                    (name == eName)
+                                        && (Maybe.map2 (==)
+                                                (ModuleNameLookupTable.moduleNameFor lookupTable pat)
+                                                (ModuleNameLookupTable.moduleNameFor lookupTable e)
+                                                |> Maybe.withDefault False
+                                           )
+                                then
+                                    goMultiple ps es
+
+                                else
+                                    -- Names aren't a match
+                                    done False
+
+                            _ ->
+                                -- It's not worth it to try to reduce the few other cases we
+                                -- potentially could here, e.g. `let...in`, because they
+                                -- should almost never show up
+                                done False
+                    )
+
+        ( NamedPattern _ _, _ ) ->
+            -- It's not worth it to try to reduce the few other cases we
+            -- potentially could here, e.g. `let...in`, because they
+            -- should almost never show up
+            done False
+
+        ( RecordPattern ps, RecordExpr es ) ->
+            let
+                { used, unused } =
+                    pairRecordDestructuring ps es
+
+                ( usefulPatterns, uselessPatterns ) =
+                    -- Convert `Node String` to `Node Pattern`, since `RecordPattern` is weird
+                    List.map (Tuple.mapBoth (Node.map VarPattern) (Tuple.second << Node.value)) used
+                        |> List.partition (isUseful << Tuple.first)
+            in
+            { uselessPatterns = List.map (\( p, e ) -> { isUnit = False, pattern = p, expression = e }) uselessPatterns
+            , usefulPatterns = usefulPatterns
+            , uselessExpressions = List.map (Tuple.second << Node.value) unused
+            }
+
+        ( RecordPattern _, _ ) ->
+            -- It's not worth it to try to reduce the few other cases we
+            -- potentially could here, e.g. record update, because they
+            -- should almost never show up
+            done False
+
+
+{-| Given a record pattern and a record literal, return paired patterns and
+expressions, as well as any useless setters.
+-}
+pairRecordDestructuring : List (Node String) -> List (Node RecordSetter) -> { used : List ( Node String, Node RecordSetter ), unused : List (Node RecordSetter) }
+pairRecordDestructuring ps es =
+    List.foldr
+        (\setter ( usedAcc, unusedAcc, remaining ) ->
+            let
+                name : String
+                name =
+                    Node.value <| Tuple.first <| Node.value setter
+            in
+            case List.partition (\p -> name == Node.value p) remaining of
+                ( [ p ], rem ) ->
+                    ( ( p, setter ) :: usedAcc, unusedAcc, rem )
+
+                ( _, rem ) ->
+                    ( usedAcc, setter :: unusedAcc, rem )
+        )
+        ( [], [], ps )
+        es
+        |> (\( used, unused, _ ) ->
+                -- Throw out any remaining patterns, since they'd be a type error anyways
+                { used = used, unused = unused }
+           )
+
+
+{-| Given bindings in scope, a list of ignorable expressions, and a list of
+useless patterns, return any binding that are removable (not used elsewhere).
+-}
+removableBindings : Dict String Binding -> List (Node Expression) -> List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression } -> List { isUnit : Bool, binding : Binding }
+removableBindings bindings allUselessExpressions =
+    List.concatMap
+        (\r ->
+            namesUsedInExpression r.expression
+                |> (\bs -> DictX.keepOnly bs bindings)
+                |> Dict.filter
+                    (\name { canDestructureAt, scope } ->
+                        canDestructureAt
+                            && (countUsesIn scope name == List.foldl (\e acc -> acc + countUsesIn e name) 0 allUselessExpressions)
+                    )
+                |> Dict.values
+                |> List.map (\b -> { isUnit = r.isUnit, binding = b })
+        )
 
 
 {-| Combine two dictionaries. If there is a collision, a combining function is
