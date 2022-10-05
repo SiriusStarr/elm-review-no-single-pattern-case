@@ -1130,6 +1130,89 @@ makeFix (Config { fixBy, replaceUseless }) ({ destructuring } as info) =
         |> MaybeX.unwrap [] ((::) (replaceCaseBlockWithExpression info))
 
 
+{-| Given a `SinglePatternCase` and a non-empty list of patterns and expressions
+to destructure in the closest existing `let` block, return a list of fixes
+moving patterns to that `let` (or `Nothing` if that failed) as well as any
+remaining patterns that could not be fixed in it.
+-}
+destructureInExistingLet :
+    SinglePatternCase
+    -> Nonempty ( Node Pattern, Node Expression )
+    ->
+        { fixedInLet : Maybe (List Fix)
+        , noSuitableLetExists : List ( Node Pattern, Node Expression )
+        }
+destructureInExistingLet ({ context } as info) patterns =
+    let
+        { hasValidLet, lacksValidLet } =
+            getValidLetBlock info patterns
+    in
+    { fixedInLet =
+        MaybeX.unwrap []
+            (\( lb, ps ) ->
+                moveDestructuringsToExistingLetBlock context.moduleContext lb ps
+            )
+            hasValidLet
+            |> Just
+    , noSuitableLetExists = lacksValidLet
+    }
+
+
+{-| Given a `SinglePatternCase`, whether or not to use `as` patterns if
+necessary, and a non-empty list of patterns and expressions to destructure at
+the bindings of (if possible), return a list of fixes destructuring patterns at
+bindings, as well as any patterns that needed `as` patterns (if told not to use
+them), and any remaining patterns that could not be destructured in this
+fashion.
+-}
+destructureAtBindings :
+    SinglePatternCase
+    -> Bool
+    -> Nonempty ( Node Pattern, Node Expression )
+    ->
+        { fixedInArg : Maybe (List Fix)
+        , useAsFallback : List ( Node Pattern, DestructurableBinding )
+        , notDestructurable : List ( Node Pattern, Node Expression )
+        }
+destructureAtBindings { context, destructuring, outputExpression } destructureUsingAsPattern patterns =
+    let
+        { canDestructure, cannotDestructure } =
+            let
+                ( can, cannot ) =
+                    NE.toList patterns
+                        |> List.map
+                            (\( p, e ) ->
+                                getValidDestructurableBinding context
+                                    { pattern = p
+                                    , ignoreNameUsesIn = destructuring.removedExpressions
+                                    , destructuredExpression = e
+                                    , outputExpression = outputExpression
+                                    }
+                                    |> Result.fromMaybe ( p, e )
+                                    |> Result.map (Tuple.pair p)
+                            )
+                        |> ResultX.partition
+            in
+            checkForCollidingBindings can
+                |> (\( c, collided ) ->
+                        { canDestructure = c
+                        , cannotDestructure = cannot ++ List.concat collided
+                        }
+                   )
+
+        ( moveToArg, useAsFallback ) =
+            if destructureUsingAsPattern then
+                ( canDestructure, [] )
+
+            else
+                List.partition ((==) Nothing << .requiredAsName << Tuple.second) canDestructure
+    in
+    { fixedInArg = Just <| List.map (movePatternToBinding context) moveToArg
+    , useAsFallback = useAsFallback
+    , notDestructurable = cannotDestructure
+    }
+
+
 {-| Given a list of patterns and their locations to destructure at, partition
 them into those whose binding sites do not overlap and those that would conflict
 with each other.
