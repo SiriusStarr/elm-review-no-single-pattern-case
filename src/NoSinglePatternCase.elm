@@ -1095,12 +1095,20 @@ fixUselessBindings =
 
 
 {-| Given context, a pattern, the expression it destructures, and a list of
-expressions to ignore uses in (for `as` patterns), return a
-`DestructurableBinding` the pattern can be moved to, if possible (checking for
-name clashes and the like).
+expressions to ignore uses in (for `as` patterns), and the output expression of
+case, return a `DestructurableBinding` the pattern can be moved to, if possible
+(checking for name clashes and the like).
 -}
-getValidDestructurableBinding : LocalContext -> { pattern : Node Pattern, destructuredExpression : Node Expression, ignoreNameUsesIn : List (Node Expression) } -> Maybe DestructurableBinding
-getValidDestructurableBinding { bindings } { pattern, destructuredExpression, ignoreNameUsesIn } =
+getValidDestructurableBinding :
+    LocalContext
+    ->
+        { pattern : Node Pattern
+        , destructuredExpression : Node Expression
+        , ignoreNameUsesIn : List (Node Expression)
+        , outputExpression : Node Expression
+        }
+    -> Maybe DestructurableBinding
+getValidDestructurableBinding { bindings } { pattern, destructuredExpression, ignoreNameUsesIn, outputExpression } =
     let
         getBinding : Node Expression -> Maybe ( String, Binding )
         getBinding expr =
@@ -1121,7 +1129,7 @@ getValidDestructurableBinding { bindings } { pattern, destructuredExpression, ig
             (\( name, b ) ->
                 if
                     nameClash
-                        { insideExpr = ignoreNameUsesIn
+                        { insideExpr = outputExpression :: ignoreNameUsesIn
                         , scope = b.scope
                         }
                         pattern
