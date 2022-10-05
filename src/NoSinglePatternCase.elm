@@ -975,85 +975,159 @@ singlePatternCaseError config info =
 the config or fail.
 -}
 makeFix : Config fixBy -> SinglePatternCase -> List Fix
-makeFix (Config { fixBy }) ({ context, caseExpression, singleExpression, singlePattern } as info) =
+makeFix (Config { fixBy, replaceUseless }) ({ destructuring } as info) =
     let
         destructureInLet :
             { ifNoLetBlock : Either (Either CreateNewLet noLetFix) Fail
-            , noLetFix : noLetFix -> List Fix
+            , noLetFix : noLetFix -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
             }
-            -> List Fix
-        destructureInLet { ifNoLetBlock, noLetFix } =
-            case getValidLetBlock context caseExpression ( singlePattern, singleExpression ) of
-                Just existingLetBlock ->
-                    moveCasePatternToLetBlock info existingLetBlock
+            -> Nonempty ( Node Pattern, Node Expression )
+            -> Maybe (List Fix)
+        destructureInLet { ifNoLetBlock, noLetFix } ps =
+            let
+                { fixedInLet, noSuitableLetExists } =
+                    destructureInExistingLet info ps
 
-                Nothing ->
-                    either3 ifNoLetBlock useNewLet noLetFix orFail
+                noLetFixes : Maybe (List Fix)
+                noLetFixes =
+                    noSuitableLetExists
+                        |> fixRemaining
+                            (either3 ifNoLetBlock
+                                useNewLet
+                                noLetFix
+                                orFail
+                            )
+            in
+            combineFixes
+                [ fixedInLet
+                , noLetFixes
+                ]
 
-        useNewLet : CreateNewLet -> List Fix
+        useNewLet : CreateNewLet -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
         useNewLet CreateNewLet =
-            fixInNewLet info
+            Just << moveDestructuringsToNewLetBlock info
 
-        fallbackToArg : UseArgInstead -> List Fix
+        fallbackToArg : UseArgInstead -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
         fallbackToArg (UseArgInstead { ifAsPatternNeeded, ifCannotDestructure }) =
             destructureInArg
-                { asPatternFix = always useNewLet
-                , cannotDestructureFix = useNewLet
+                { asPatternAlternative = useNewLet
                 , ifAsPatternNeeded = ifAsPatternNeeded
                 , ifCannotDestructure = ifCannotDestructure
+                , cannotDestructureFix = useNewLet
                 }
 
-        orFail : Fail -> List Fix
-        orFail Fail =
-            []
+        orFail : Fail -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
+        orFail Fail _ =
+            Nothing
 
-        fallbackToLet : (noLetFix -> List Fix) -> UseLetInstead (Either (Either CreateNewLet noLetFix) Fail) -> List Fix
+        fallbackToLet : (noLetFix -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)) -> UseLetInstead (Either (Either CreateNewLet noLetFix) Fail) -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
         fallbackToLet noLetFix (UseLetInstead { ifNoLetBlock }) =
             destructureInLet
                 { ifNoLetBlock = ifNoLetBlock
                 , noLetFix = noLetFix
                 }
 
-        orUseAsPattern : ( String, Binding ) -> UseAsPattern -> List Fix
-        orUseAsPattern ( name, binding ) UseAsPattern =
-            moveCasePatternToBinding info binding (Just name)
+        orUseAsPattern : UseAsPattern -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
+        orUseAsPattern UseAsPattern ps =
+            let
+                { fixedInArg, useAsFallback, notDestructurable } =
+                    -- Force `as` pattern usage
+                    destructureAtBindings info True ps
+            in
+            case ( fixedInArg, useAsFallback, notDestructurable ) of
+                ( fixes, [], [] ) ->
+                    -- If this handled everything, we're okay
+                    fixes
+
+                _ ->
+                    -- Some patterns were not destructurable, so fail
+                    Nothing
 
         destructureInArg :
-            { asPatternFix : ( String, Binding ) -> asFallback -> List Fix
-            , cannotDestructureFix : destructureFallback -> List Fix
-            , ifAsPatternNeeded : Either (Either asFallback UseAsPattern) Fail
+            { asPatternAlternative : asPatternAlternative -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
+            , ifAsPatternNeeded : UseAsPatternOrFailOr asPatternAlternative
             , ifCannotDestructure : Either (Either destructureFallback Fail) Fail
+            , cannotDestructureFix : destructureFallback -> Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)
             }
-            -> List Fix
-        destructureInArg { asPatternFix, cannotDestructureFix, ifAsPatternNeeded, ifCannotDestructure } =
-            case getValidPatternBinding context caseExpression ( singlePattern, singleExpression ) of
-                Just { name, binding, requiresAsPattern } ->
-                    if requiresAsPattern then
-                        either3 ifAsPatternNeeded
-                            (asPatternFix ( name, binding ))
-                            (orUseAsPattern ( name, binding ))
-                            orFail
+            -> Nonempty ( Node Pattern, Node Expression )
+            -> Maybe (List Fix)
+        destructureInArg { asPatternAlternative, ifAsPatternNeeded, ifCannotDestructure, cannotDestructureFix } ps =
+            let
+                { fixedInArg, useAsFallback, notDestructurable } =
+                    let
+                        useAs : Bool
+                        useAs =
+                            either3 ifAsPatternNeeded
+                                (always False)
+                                (always True)
+                                (always False)
+                    in
+                    destructureAtBindings info useAs ps
 
-                    else
-                        moveCasePatternToBinding info binding Nothing
+                asFallbackFixes : Maybe (List Fix)
+                asFallbackFixes =
+                    List.map (Tuple.mapSecond .fallbackExpression) useAsFallback
+                        |> fixRemaining
+                            (either3 ifAsPatternNeeded
+                                asPatternAlternative
+                                -- This should never happen
+                                (\_ _ -> Nothing)
+                                orFail
+                            )
 
-                Nothing ->
-                    either3 ifCannotDestructure cannotDestructureFix orFail orFail
+                notDestructurableFixes : Maybe (List Fix)
+                notDestructurableFixes =
+                    notDestructurable
+                        |> fixRemaining (either3 ifCannotDestructure cannotDestructureFix orFail orFail)
+            in
+            combineFixes
+                [ fixedInArg
+                , asFallbackFixes
+                , notDestructurableFixes
+                ]
+
+        fixRemaining : (Nonempty ( Node Pattern, Node Expression ) -> Maybe (List Fix)) -> List ( Node Pattern, Node Expression ) -> Maybe (List Fix)
+        fixRemaining fallback =
+            NE.fromList
+                >> MaybeX.unwrap (Just []) fallback
+
+        combineFixes : List (Maybe (List Fix)) -> Maybe (List Fix)
+        combineFixes =
+            MaybeX.combine
+                >> Maybe.map List.concat
     in
-    case fixBy of
-        DestructureInLet { ifNoLetBlock } ->
-            destructureInLet
-                { noLetFix = fallbackToArg
-                , ifNoLetBlock = ifNoLetBlock
-                }
+    NE.fromList destructuring.usefulPatterns
+        |> MaybeX.unwrap (Just [])
+            (\patterns ->
+                case fixBy of
+                    DestructureInLet { ifNoLetBlock } ->
+                        destructureInLet
+                            { noLetFix = fallbackToArg
+                            , ifNoLetBlock = ifNoLetBlock
+                            }
+                            patterns
 
-        DestructureInArgument { ifAsPatternNeeded, ifCannotDestructure } ->
-            destructureInArg
-                { asPatternFix = \b -> fallbackToLet (orUseAsPattern b)
-                , cannotDestructureFix = fallbackToLet orFail
-                , ifAsPatternNeeded = ifAsPatternNeeded
-                , ifCannotDestructure = ifCannotDestructure
-                }
+                    DestructureInArgument { ifAsPatternNeeded, ifCannotDestructure } ->
+                        destructureInArg
+                            { asPatternAlternative = fallbackToLet orUseAsPattern
+                            , ifAsPatternNeeded = ifAsPatternNeeded
+                            , ifCannotDestructure = ifCannotDestructure
+                            , cannotDestructureFix = fallbackToLet orFail
+                            }
+                            patterns
+            )
+        |> Maybe.map
+            (\fs ->
+                (if replaceUseless then
+                    fixUselessBindings destructuring.removableBindings
+
+                 else
+                    []
+                )
+                    ++ fs
+            )
+        -- If fixes succeeded, replace the case block with the single expression
+        |> MaybeX.unwrap [] ((::) (replaceCaseBlockWithExpression info))
 
 
 {-| Given a list of patterns and their locations to destructure at, partition
@@ -1195,36 +1269,36 @@ getValidDestructurableBinding { bindings } { pattern, destructuredExpression, ig
 {-| Given context, a `LetBlock`, and a non-empty list of patterns and
 expressions to destructure, destructure them at the end of the `LetBlock`.
 -}
-moveDestructuringsToExistingLetBlock : ModuleContext -> LetBlock -> Nonempty ( Node Pattern, Node Expression ) -> Nonempty Fix
-moveDestructuringsToExistingLetBlock moduleContext { declarations } =
+moveDestructuringsToExistingLetBlock : ModuleContext -> LetBlock -> Nonempty ( Node Pattern, Node Expression ) -> List Fix
+moveDestructuringsToExistingLetBlock moduleContext { declarations } ps =
     let
         oldDeclarationRange : Range
         oldDeclarationRange =
             List.map Node.range declarations
                 |> Range.combine
     in
-    makeLetDecs moduleContext (oldDeclarationRange.start.column - 1)
-        >> (\ds -> "\n\n" ++ ds)
-        >> Fix.insertAt oldDeclarationRange.end
-        >> NE.singleton
+    [ makeLetDecs moduleContext (oldDeclarationRange.start.column - 1) ps
+        |> (\ds -> "\n\n" ++ ds)
+        |> Fix.insertAt oldDeclarationRange.end
+    ]
 
 
 {-| Given a single pattern case and a non-empty list of patterns and expressions
 to destructure, create a new `let` to destructure them in.
 -}
-moveDestructuringsToNewLetBlock : SinglePatternCase -> Nonempty ( Node Pattern, Node Expression ) -> Nonempty Fix
+moveDestructuringsToNewLetBlock : SinglePatternCase -> Nonempty ( Node Pattern, Node Expression ) -> List Fix
 moveDestructuringsToNewLetBlock { caseRange, context } ps =
     -- Leading spaces here are so that we leave an empty, indented line at for
     -- when we replace the expression later
-    [ " let"
-    , makeLetDecs context.moduleContext 5 ps
-    , " in"
-    , " "
-    ]
+    [ [ " let"
+      , makeLetDecs context.moduleContext 5 ps
+      , " in"
+      , " "
+      ]
         |> String.join "\n"
         |> reindent (caseRange.start.column - 1)
         |> Fix.insertAt caseRange.start
-        |> NE.singleton
+    ]
 
 
 {-| Given context, an indent amount, and a non-empty list of patterns and
