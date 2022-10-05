@@ -343,8 +343,8 @@ countUsesIn expr name =
 report if the name is used in the outer expression exclusive of the inner
 expressions.
 -}
-nameUsedOutsideExprs : String -> { inside : List (Node Expression), scope : Node Expression } -> Bool
-nameUsedOutsideExprs name { inside, scope } =
+nameUsedOutsideExprs : { inside : List (Node Expression), scope : Node Expression } -> String -> Bool
+nameUsedOutsideExprs { inside, scope } name =
     countUsesIn scope name > List.foldl (\e acc -> acc + countUsesIn e name) 0 inside
 
 
