@@ -1114,68 +1114,71 @@ getValidPatternBinding context caseExpr ( replacePattern, replaceScope ) =
             )
 
 
-{-| Given the expression in `case ... of` and the range of the entire `case`,
-the single case pattern, the single case expression, and a `let` block, move the
-destructuring into the `let` block. This does **not** check that the `let` block
-is viable to be moved to and should only be used with a `let` block obtained
-from `getValidLetBlock`.
+{-| Given context, a `LetBlock`, and a non-empty list of patterns and
+expressions to destructure, destructure them at the end of the `LetBlock`.
 -}
-moveCasePatternToLetBlock : SinglePatternCase -> LetBlock -> List Fix
-moveCasePatternToLetBlock ({ caseExpression, singlePattern, range, context } as info) { declarations } =
+moveDestructuringsToExistingLetBlock : ModuleContext -> LetBlock -> Nonempty ( Node Pattern, Node Expression ) -> Nonempty Fix
+moveDestructuringsToExistingLetBlock moduleContext { declarations } =
     let
         oldDeclarationRange : Range
         oldDeclarationRange =
             List.map Node.range declarations
                 |> Range.combine
-
-        letIndentAmt : Int
-        letIndentAmt =
-            oldDeclarationRange.start.column - 1
-
-        newDeclaration : String
-        newDeclaration =
-            Node.range singlePattern
-                |> context.extractSourceCode
-                |> (\p ->
-                        String.concat
-                            [ "\n\n"
-                            , String.repeat letIndentAmt " "
-                            , "("
-                            , p
-                            , ") =\n"
-                            , String.repeat (letIndentAmt + 4) " "
-                            , expr
-                            ]
-                   )
-
-        expr : String
-        expr =
-            Node.range caseExpression
-                |> context.extractSourceCode
-                |> reindent (letIndentAmt + 5 - range.start.column)
     in
-    Fix.insertAt oldDeclarationRange.end newDeclaration
-        |> (\f -> [ f, replaceCaseBlockWithExpression info ])
+    makeLetDecs moduleContext (oldDeclarationRange.start.column - 1)
+        >> (\ds -> "\n\n" ++ ds)
+        >> Fix.insertAt oldDeclarationRange.end
+        >> NE.singleton
 
 
-{-| Given a case expression and a single case pattern and expression, convert
-the case into a `let` block destructured in.
+{-| Given a single pattern case and a non-empty list of patterns and expressions
+to destructure, create a new `let` to destructure them in.
 -}
-fixInNewLet : SinglePatternCase -> List Fix
-fixInNewLet { caseExpression, range, singlePattern, singleExpression, context } =
-    [ String.concat
-        [ "let\n    ("
-        , context.extractSourceCode (Node.range singlePattern)
-        , ") =\n"
-        , "        "
-        , context.extractSourceCode (Node.range caseExpression)
-            |> reindent 4
-        , "\nin\n"
-        , context.extractSourceCode (Node.range singleExpression)
-        ]
-        |> reindent range.start.column
-        |> Fix.replaceRangeBy range
+moveDestructuringsToNewLetBlock : SinglePatternCase -> Nonempty ( Node Pattern, Node Expression ) -> Nonempty Fix
+moveDestructuringsToNewLetBlock { caseRange, context } ps =
+    -- Leading spaces here are so that we leave an empty, indented line at for
+    -- when we replace the expression later
+    [ " let"
+    , makeLetDecs context.moduleContext 5 ps
+    , " in"
+    , " "
     ]
+        |> String.join "\n"
+        |> reindent (caseRange.start.column - 1)
+        |> Fix.insertAt caseRange.start
+        |> NE.singleton
+
+
+{-| Given context, an indent amount, and a non-empty list of patterns and
+expressions to destructure, create `let` declarations that destructure them.
+-}
+makeLetDecs : ModuleContext -> Int -> Nonempty ( Node Pattern, Node Expression ) -> String
+makeLetDecs { extractSourceCode } letIndentAmt =
+    NE.map
+        (\( pat, expr ) ->
+            let
+                e : String
+                e =
+                    Node.range expr
+                        |> extractSourceCode
+                        |> reindent (letIndentAmt + 9 - (Node.range expr).start.column)
+
+                indent : String
+                indent =
+                    String.repeat letIndentAmt " "
+            in
+            String.concat
+                [ indent
+                , "("
+                , extractSourceCode <| Node.range pat
+                , ") =\n"
+                , indent
+                , "    "
+                , e
+                ]
+        )
+        >> NE.toList
+        >> String.join "\n\n"
 
 
 {-| Given a `SinglePaternCase` and a non-empty list of patterns/expressions to
