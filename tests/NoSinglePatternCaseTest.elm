@@ -1885,7 +1885,7 @@ unpack =
 
                 (Opaque i) =
                     foo
-                       |> o
+                      |> o
             in
             i
                     + i
@@ -2085,8 +2085,8 @@ withUnpacked map =
                    (always map)
     in
     ( i
-                , List.map ((+) 1) [ 1 ]
-                )
+            , List.map ((+) 1) [ 1 ]
+            )
 """
                         ]
         , test "complex scope" <|
