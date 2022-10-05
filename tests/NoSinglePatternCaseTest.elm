@@ -2171,6 +2171,130 @@ unpack o =
     i
 """
                         ]
+        , test "name clash but removable" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo a =
+            0
+    in
+    case (o, o) of
+        (Opaque i, a) -> i
+"""
+                    |> Review.Test.run
+                        (fixInLet
+                            |> ifNoLetExists createNewLet
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "(Opaque i, a)"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Int
+unpack o =
+    let
+        foo a =
+            0
+
+        (Opaque i) =
+            o
+    in
+    i
+"""
+                        ]
+        , test "name clash in one, not other" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> (Int, Opaque)
+unpack o =
+    let
+        foo a =
+            0
+    in
+    case (o, o) of
+        (Opaque i, a) -> (i, a)
+"""
+                    |> Review.Test.run
+                        (fixInLet
+                            |> ifNoLetExists createNewLet
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "(Opaque i, a)"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> (Int, Opaque)
+unpack o =
+    let
+        foo a =
+            0
+
+        (Opaque i) =
+            o
+    in
+    let
+        (a) =
+            o
+    in
+    (i, a)
+"""
+                        ]
+        , test "not in scope for one, not other" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Opaque -> (Int, Int)
+unpack o =
+    let
+        foo = bar
+    in
+    (\\x ->
+        case (o, x) of
+            (Opaque i, Opaque j) -> (i, j)
+    )
+"""
+                    |> Review.Test.run
+                        (fixInLet
+                            |> ifNoLetExists
+                                (fixInArgumentInstead
+                                    |> andIfAsPatternRequired fail
+                                    |> andIfCannotDestructureAtArgument fail
+                                )
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "(Opaque i, Opaque j)"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+unpack : Opaque -> Opaque -> (Int, Int)
+unpack o =
+    let
+        foo = bar
+
+        (Opaque i) =
+            o
+    in
+    (\\(Opaque j) ->
+        (i, j)
+    )
+"""
+                        ]
         ]
 
 
