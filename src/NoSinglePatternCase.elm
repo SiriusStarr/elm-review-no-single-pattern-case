@@ -1088,28 +1088,57 @@ fixUselessBindings =
         )
 
 
-{-| Given context, an expression in a `case...of`, and a single case pattern and
-single case expression, return the binding that the pattern could be
-destructured at, if one exists, and whether or not an `as` pattern is required
-to do so. This function also checks for possible name clashes.
+{-| Given context, a pattern, the expression it destructures, and a list of
+expressions to ignore uses in (for `as` patterns), return a
+`DestructurableBinding` the pattern can be moved to, if possible (checking for
+name clashes and the like).
 -}
-getValidPatternBinding : LocalContext -> Node Expression -> ( Node Pattern, Node Expression ) -> Maybe { requiresAsPattern : Bool, name : String, binding : Binding }
-getValidPatternBinding context caseExpr ( replacePattern, replaceScope ) =
-    getDestructurableBinding context caseExpr
+getValidDestructurableBinding : LocalContext -> { pattern : Node Pattern, destructuredExpression : Node Expression, ignoreNameUsesIn : List (Node Expression) } -> Maybe DestructurableBinding
+getValidDestructurableBinding { bindings } { pattern, destructuredExpression, ignoreNameUsesIn } =
+    let
+        getBinding : Node Expression -> Maybe ( String, Binding )
+        getBinding expr =
+            case Node.value expr of
+                FunctionOrValue [] name ->
+                    Dict.get name bindings
+                        |> MaybeX.filter .canDestructureAt
+                        |> Maybe.map (Tuple.pair name)
+
+                ParenthesizedExpression e ->
+                    getBinding e
+
+                _ ->
+                    Nothing
+    in
+    getBinding destructuredExpression
         |> Maybe.andThen
-            (\( name, { scope } as b ) ->
+            (\( name, b ) ->
                 if
-                    allBindingsInPattern replaceScope replacePattern
-                        |> List.any (\( n, _ ) -> nameUsedOutsideExpr n replaceScope scope)
+                    nameClash
+                        { insideExpr = ignoreNameUsesIn
+                        , scope = b.scope
+                        }
+                        pattern
                 then
                     -- Cannot move the pattern if it would cause name clash
                     Nothing
 
                 else
                     Just
-                        { requiresAsPattern = nameUsedOutsideExpr name caseExpr scope
-                        , name = name
+                        { requiredAsName =
+                            if
+                                nameUsedOutsideExprs
+                                    { inside = destructuredExpression :: ignoreNameUsesIn
+                                    , scope = b.scope
+                                    }
+                                    name
+                            then
+                                Just name
+
+                            else
+                                Nothing
                         , binding = b
+                        , fallbackExpression = destructuredExpression
                         }
             )
 
