@@ -1,7 +1,7 @@
 module NoSinglePatternCase exposing
     ( rule
     , Config, fixInArgument, fixInLet
-    , replaceUnusedBindings, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
+    , reportAllCustomTypes, replaceUnusedBindings, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
     , fail, createNewLet, useAsPattern, fixInArgumentInstead, andIfAsPatternRequired, andIfCannotDestructureAtArgument, fixInLetInstead, andIfNoLetExists
     , FixInArgument, FixInLet, UseArgInstead, UseLetInstead, CreateNewLet, Fail, UseAsPattern, UseAsPatternOrFailOr, CreateNewLetOr, UseArgOrCreateNewLetOrFail, UseLetOr, UseLetOrFail, UseAsPatternOrLetsOrFail, Either
     )
@@ -31,7 +31,7 @@ which name should be preferred.
 
 ## Customizing Config Behavior
 
-@docs replaceUnusedBindings, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
+@docs reportAllCustomTypes, replaceUnusedBindings, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
 
 
 ## Config Behavior Options
@@ -137,6 +137,10 @@ or
 
 ## Success
 
+Single patterns with constructors that do not match their type name, e.g.
+`type Msg = ButtonClicked`, are allowed by default. This behavior can be changed
+with [`reportAllCustomTypes`](#reportAllCustomTypes).
+
 Any case expression with more than one pattern match will not be reported.
 Consider using [`jfmengels/elm-review-simplify`](https://package.elm-lang.org/packages/jfmengels/elm-review-simplify/latest)
 to detect unnecessary multi-pattern cases.
@@ -191,6 +195,10 @@ The default `Config`s [`fixInArgument`](#fixInArgument) and
 [`fixInLet`](#fixInLet) should be used as reasonable defaults, with more
 customization detailed in those sections.
 
+The behavior of the rule with constructors that don't match their type name can
+be configured via [`reportAllCustomTypes`](#reportAllCustomTypes). By default,
+only constructors with an identical name to their type are reported.
+
 The behavior of the rule in the context of useless single pattern cases can also
 be configured via [`replaceUnusedBindings`](#replaceUnusedBindings). A single
 pattern case is considered to be useless if its pattern does not bind any name
@@ -198,7 +206,11 @@ that is actually used in the expression.
 
 -}
 type Config fixBy
-    = Config { fixBy : FixBy, replaceUseless : Bool }
+    = Config
+        { fixBy : FixBy
+        , replaceUseless : Bool
+        , reportAllTypes : Bool
+        }
 
 
 {-| Phantom type for `Config fixBy`.
@@ -268,6 +280,7 @@ fixInArgument =
                 , ifCannotDestructure = fail
                 }
         , replaceUseless = False
+        , reportAllTypes = False
         }
 
 
@@ -350,7 +363,46 @@ fixInLet =
     Config
         { fixBy = DestructureInLet { ifNoLetBlock = createNewLet }
         , replaceUseless = False
+        , reportAllTypes = False
         }
+
+
+{-| By default, only constructors whose names are identical to their type are
+reported. This setting changes behavior back to that of version `2.0.2` and
+earlier, where absolutely all single pattern cases are flagged by the rule,
+regardless of the types.
+
+For instance, _both_ of the cases in the following are flagged when this setting
+is used.
+
+    type
+        Date
+        -- Constructor has same name as type
+        = Date Int
+
+    type
+        Msg
+        -- Constructor has different name than type
+        = ThingieClicked
+
+    update1 : Date -> Int -> Int
+    update1 date i =
+        case date of
+            -- THIS CASE IS ALWAYS FLAGGED
+            Date j ->
+                i + j
+
+    update2 : Msg -> Int -> Int
+    update2 msg i =
+        case msg of
+            -- THIS CASE IS NOT FLAGGED BY DEFAULT
+            ThingieClicked ->
+                i + 1
+
+-}
+reportAllCustomTypes : Config fixBy -> Config fixBy
+reportAllCustomTypes (Config r) =
+    Config { r | reportAllTypes = True }
 
 
 {-| A single pattern case is considered to be useless if its pattern does not
