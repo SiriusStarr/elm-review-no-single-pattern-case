@@ -55,15 +55,15 @@ sake of annotation, should it be necessary.
 -}
 
 import Dict exposing (Dict)
-import Dict.Extra as DictX
 import Elm.Syntax.Declaration exposing (Declaration(..))
 import Elm.Syntax.Expression exposing (Expression(..), LetBlock, LetDeclaration(..))
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern)
 import Elm.Syntax.Range as Range exposing (Range)
 import Maybe.Extra as MaybeX
+import Result.Extra as ResultX
 import Review.Fix as Fix exposing (Fix)
-import Review.ModuleNameLookupTable as ModuleNameLookupTable exposing (ModuleNameLookupTable)
+import Review.ModuleNameLookupTable exposing (ModuleNameLookupTable)
 import Review.Rule as Rule exposing (Error, Rule)
 import Set exposing (Set)
 import Util
