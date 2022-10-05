@@ -348,11 +348,11 @@ nameUsedOutsideExprs name { inside, scope } =
     countUsesIn scope name > List.foldl (\e acc -> acc + countUsesIn e name) 0 inside
 
 
-{-| Given some number of inner expression and an outer expression, and a list of
-inner patterns, report all names bound in the patterns that are used in the
-outer expression exclusive of the inner expressions or the patterns themselves.
+{-| Given some number of inner expression and an outer expression, and an inner
+pattern, report all names bound in the pattern that are used in the outer
+expression exclusive of the inner expressions or the patterns themselves.
 -}
-nameClash : { insideExpr : List (Node Expression), scope : Node Expression } -> List (Node Pattern) -> Bool
+nameClash : { insideExpr : List (Node Expression), scope : Node Expression } -> Node Pattern -> Bool
 nameClash { insideExpr, scope } ps =
     let
         innerUses : Dict String Int
@@ -362,8 +362,7 @@ nameClash { insideExpr, scope } ps =
 
         patternUses : Dict String Int
         patternUses =
-            List.map nameAppearancesInPattern ps
-                |> List.foldl (dictUnionWith (+)) Dict.empty
+            nameAppearancesInPattern ps
 
         outerUses : Dict String Int
         outerUses =
