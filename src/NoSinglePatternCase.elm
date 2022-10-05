@@ -1056,19 +1056,25 @@ makeFix (Config { fixBy }) ({ context, caseExpression, singleExpression, singleP
                 }
 
 
-{-| Given the full range of a `case` block, a binding to destructure at, maybe a
-name for an `as` pattern, and a single case pattern and expression, generate
-fixes destructuring in the binding. This function does not check if this is
-possible, and should only be called after `getValidPatternBinding`.
+{-| Given local context, a pattern node, and a binding to destructure at,
+generate a fix that destructures at the binding. This function does not check if
+this is possible, and should only be called after
+`getValidDestructurableBinding`.
 -}
-moveCasePatternToBinding : SinglePatternCase -> Binding -> Maybe String -> List Fix
-moveCasePatternToBinding ({ context, singlePattern } as info) { patternNodeRange } asName =
-    Node.range singlePattern
-        |> context.extractSourceCode
-        |> (\p -> MaybeX.unwrap p (\n -> String.concat [ "(", p, ") as ", n ]) asName)
+movePatternToBinding : LocalContext -> ( Node Pattern, DestructurableBinding ) -> Fix
+movePatternToBinding { moduleContext } ( pat, { requiredAsName, binding } ) =
+    Node.range pat
+        |> moduleContext.extractSourceCode
+        |> (\p ->
+                case requiredAsName of
+                    Just name ->
+                        String.concat [ "(", p, ") as ", name ]
+
+                    Nothing ->
+                        p
+           )
         |> (\p -> "(" ++ p ++ ")")
-        |> Fix.replaceRangeBy patternNodeRange
-        |> (\f -> [ f, replaceCaseBlockWithExpression info ])
+        |> Fix.replaceRangeBy binding.patternNodeRange
 
 
 {-| Remove all bindings that are in the `case...of` expression that are not used
