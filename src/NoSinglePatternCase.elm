@@ -1178,54 +1178,58 @@ fixInNewLet { caseExpression, range, singlePattern, singleExpression, context } 
     ]
 
 
-{-| Given context, get the binding information of an expression if it consists
-solely of a name and its binding location can be destructured at.
+{-| Given a `SinglePaternCase` and a non-empty list of patterns/expressions to
+destructure, get the closest `let` block to destructure in and return those that
+can be destructured there and those that can't. This requires all names in
+expression to be in scope in the `let` and checks for name clashes in the
+pattern to be moved.
 -}
-getDestructurableBinding : LocalContext -> Node Expression -> Maybe ( String, Binding )
-getDestructurableBinding ({ bindings } as context) expr =
-    case Node.value expr of
-        FunctionOrValue [] name ->
-            Dict.get name bindings
-                |> MaybeX.filter .canDestructureAt
-                |> Maybe.map (Tuple.pair name)
+getValidLetBlock : SinglePatternCase -> Nonempty ( Node Pattern, Node Expression ) -> { hasValidLet : Maybe ( LetBlock, Nonempty ( Node Pattern, Node Expression ) ), lacksValidLet : List ( Node Pattern, Node Expression ) }
+getValidLetBlock { context, destructuring, outputExpression } ps =
+    case context.closestLetBlock of
+        Nothing ->
+            { hasValidLet = Nothing
+            , lacksValidLet = NE.toList ps
+            }
 
-        ParenthesizedExpression e ->
-            getDestructurableBinding context e
+        Just { expression, letBlock } ->
+            let
+                ignorableExpressions : List (Node Expression)
+                ignorableExpressions =
+                    outputExpression :: destructuring.removedExpressions ++ NE.toList (NE.map Tuple.second ps)
+            in
+            NE.toList ps
+                |> List.foldr
+                    (\( p, e ) ( hasLetAcc, noLetAcc ) ->
+                        if
+                            namesUsedInExpression e
+                                |> Set.intersect context.newBindingsSinceLastLet
+                                |> Set.isEmpty
+                        then
+                            -- No bindings in expression weren't in scope at time of last `let`
+                            if
+                                nameClash
+                                    { insideExpr = ignorableExpressions
+                                    , scope = expression
+                                    }
+                                    p
+                            then
+                                -- Cannot move due to name clash
+                                ( hasLetAcc, ( p, e ) :: noLetAcc )
 
-        _ ->
-            Nothing
+                            else
+                                ( ( p, e ) :: hasLetAcc, noLetAcc )
 
-
-{-| Given context, the expression in a `case ... of`, and the single case
-pattern and expression, get the closest `let` block to destructure in, if one
-exists. This requires all names in expression to be in scope in the `let` and
-checks for name clashes in the pattern to be moved.
--}
-getValidLetBlock : LocalContext -> Node Expression -> ( Node Pattern, Node Expression ) -> Maybe LetBlock
-getValidLetBlock { newBindingsSinceLastLet, closestLetBlock } caseExpr ( singlePattern, singleCaseExpr ) =
-    if
-        allBindingsUsedInExpression caseExpr
-            |> Set.intersect newBindingsSinceLastLet
-            |> Set.isEmpty
-    then
-        -- No bindings in expression weren't in scope at time of last `let`
-        closestLetBlock
-            |> Maybe.andThen
-                (\{ expression, letBlock } ->
-                    if
-                        allBindingsInPattern singleCaseExpr singlePattern
-                            |> List.any (\( n, _ ) -> nameUsedOutsideExpr n singleCaseExpr expression)
-                    then
-                        -- Cannot move due to name clash
-                        Nothing
-
-                    else
-                        Just letBlock
-                )
-
-    else
-        -- Some bindings in expression weren't in scope at time of last `let`
-        Nothing
+                        else
+                            -- Some bindings in expression weren't in scope at time of last `let`
+                            ( hasLetAcc, ( p, e ) :: noLetAcc )
+                    )
+                    ( [], [] )
+                |> (\( has, lacks ) ->
+                        { hasValidLet = Maybe.map (Tuple.pair letBlock) <| NE.fromList has
+                        , lacksValidLet = lacks
+                        }
+                   )
 
 
 {-| Replace the entirety of a single-pattern case with the part after the
