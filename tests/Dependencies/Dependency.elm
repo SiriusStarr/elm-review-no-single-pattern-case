@@ -68,7 +68,7 @@ unsafePackageName packageName =
             -- unsafe, but if the generation went well, it should all be good.
             unsafePackageName packageName
                 -- Disables the tail-call optimization, so that the test crashes if we enter this case
-                |> identity
+                |> (\x -> x)
 
 
 unsafeModuleName : String -> Elm.Module.Name
@@ -81,7 +81,7 @@ unsafeModuleName moduleName =
             -- unsafe, but if the generation went well, it should all be good.
             unsafeModuleName moduleName
                 -- Disables the tail-call optimization, so that the test crashes if we enter this case
-                |> identity
+                |> (\x -> x)
 
 
 unsafeConstraint : String -> Elm.Constraint.Constraint
@@ -94,4 +94,4 @@ unsafeConstraint constraint =
             -- unsafe, but if the generation went well, it should all be good.
             unsafeConstraint constraint
                 -- Disables the tail-call optimization, so that the test crashes if we enter this case
-                |> identity
+                |> (\x -> x)
