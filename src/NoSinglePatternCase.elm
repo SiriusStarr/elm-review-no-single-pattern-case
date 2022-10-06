@@ -137,9 +137,10 @@ or
 
 ## Success
 
-Single patterns with constructors that do not match their type name, e.g.
-`type Msg = ButtonClicked`, are allowed by default. This behavior can be changed
-with [`reportAllCustomTypes`](#reportAllCustomTypes).
+Single patterns with constructors that do not match their type name, e.g. `type
+Msg = ButtonClicked`, are allowed by default, unless they are imported from
+dependencies (as those types are not expected to be iterated on). This behavior
+can be changed with [`reportAllCustomTypes`](#reportAllCustomTypes).
 
 Any case expression with more than one pattern match will not be reported.
 Consider using [`jfmengels/elm-review-simplify`](https://package.elm-lang.org/packages/jfmengels/elm-review-simplify/latest)
@@ -368,22 +369,26 @@ fixInLet =
 
 
 {-| By default, only constructors whose names are identical to their type are
-reported. This setting changes behavior back to that of version `2.0.2` and
-earlier, where absolutely all single pattern cases are flagged by the rule,
-regardless of the types.
+reported, along with types imported from dependencies (since those aren't
+expected to be iterated on). This setting changes behavior back to that of
+version `2.0.2` and earlier, where absolutely all single pattern cases are
+flagged by the rule, regardless of the types.
 
 For instance, _both_ of the cases in the following are flagged when this setting
 is used.
 
-    type
-        Date
-        -- Constructor has same name as type
-        = Date Int
+    -- import the constructor `OutsideConstructor` from some other package
 
-    type
-        Msg
-        -- Constructor has different name than type
-        = ThingieClicked
+
+    import SomeOutsidePackage exposing (OutsideType(..))
+
+    type Date
+        = -- Constructor has same name as type
+          Date Int
+
+    type Msg
+        = -- Constructor has different name than type
+          ThingieClicked
 
     update1 : Date -> Int -> Int
     update1 date i =
@@ -398,6 +403,13 @@ is used.
             -- THIS CASE IS NOT FLAGGED BY DEFAULT
             ThingieClicked ->
                 i + 1
+
+    update3 : OutsideType -> Int -> Int
+    update3 oType i =
+        case oType of
+            -- THIS CASE IS ALWAYS FLAGGED
+            OutsideConstructor j ->
+                i + j
 
 -}
 reportAllCustomTypes : Config fixBy -> Config fixBy
