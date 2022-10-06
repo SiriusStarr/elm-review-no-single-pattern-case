@@ -181,20 +181,22 @@ rule config =
 type alias ModuleContext =
     { extractSourceCode : Range -> String
     , lookupTable : ModuleNameLookupTable
+    , nonWrappedTypes : Dict ModuleName (Set String)
     }
 
 
 {-| Project context for the rule.
 -}
 type alias ProjectContext =
-    {}
+    { nonWrappedTypes : Dict ModuleName (Set String)
+    }
 
 
 {-| The initial project context.
 -}
 initialContext : ProjectContext
 initialContext =
-    {}
+    { nonWrappedTypes = Dict.empty }
 
 
 {-| Visit each module, first getting types from all declarations and then
@@ -211,9 +213,15 @@ moduleVisitor config schema =
 fromModuleToProject : Rule.ContextCreator ModuleContext ProjectContext
 fromModuleToProject =
     Rule.initContextCreator
-        (\moduleContext ->
-            {}
+        (\moduleName moduleContext ->
+            { nonWrappedTypes =
+                moduleContext.nonWrappedTypes
+                    |> Dict.get []
+                    |> Maybe.withDefault Set.empty
+                    |> Dict.singleton moduleName
+            }
         )
+        |> Rule.withModuleName
 
 
 {-| Create a `ModuleContext` from a `ProjectContext`.
@@ -221,22 +229,24 @@ fromModuleToProject =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\extractSourceCode lookupTable projectContext ->
-            -- , customTypes = projectContext.customTypes
-            -- , moduleName = String.join "." <| Rule.moduleNameFromMetadata metadata
+        (\extractSourceCode lookupTable moduleName projectContext ->
             { extractSourceCode = extractSourceCode
             , lookupTable = lookupTable
+            , nonWrappedTypes = projectContext.nonWrappedTypes
             }
         )
         |> Rule.withSourceCodeExtractor
         |> Rule.withModuleNameLookupTable
+        |> Rule.withModuleName
 
 
 {-| Combine `ProjectContext`s.
 -}
 foldProjectContexts : ProjectContext -> ProjectContext -> ProjectContext
 foldProjectContexts newContext prevContext =
-    {}
+    { nonWrappedTypes =
+        Dict.union newContext.nonWrappedTypes prevContext.nonWrappedTypes
+    }
 
 
 {-| Configure the rule, determining how automatic fixes are generated.
