@@ -144,12 +144,15 @@ namesUsedInExpression expr =
     directly destructure.
   - `removedExpressions` -- These are expressions that will be removed when the
     `case` is rewritten, so we can ignore the use of anything in them.
+  - `ignoredPatterns` -- Patterns that we were told to not reduce, so they will
+    be left as a `case...of`.
 
 -}
 type alias Destructuring =
     { removableBindings : List { isUnit : Bool, binding : Binding }
     , usefulPatterns : List ( Node Pattern, Node Expression )
     , removedExpressions : List (Node Expression)
+    , ignoredPatterns : List ( Node Pattern, Node Expression )
     }
 
 
@@ -166,7 +169,7 @@ reduceDestructuring :
     -> Destructuring
 reduceDestructuring { bindings, outputExpression, lookupTable } pattern expression =
     pairPatternsWithExpression lookupTable (namesUsedInExpression outputExpression) pattern expression
-        |> (\{ uselessPatterns, usefulPatterns, uselessExpressions } ->
+        |> (\{ uselessPatterns, usefulPatterns, uselessExpressions, ignoredPatterns } ->
                 let
                     allUselessExpressions : List (Node Expression)
                     allUselessExpressions =
@@ -175,6 +178,7 @@ reduceDestructuring { bindings, outputExpression, lookupTable } pattern expressi
                 { removableBindings = removableBindings bindings allUselessExpressions uselessPatterns
                 , usefulPatterns = usefulPatterns
                 , removedExpressions = allUselessExpressions
+                , ignoredPatterns = ignoredPatterns
                 }
            )
 
@@ -191,6 +195,7 @@ pairPatternsWithExpression :
         { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
         , usefulPatterns : List ( Node Pattern, Node Expression )
         , uselessExpressions : List (Node Expression)
+        , ignoredPatterns : List ( Node Pattern, Node Expression )
         }
 pairPatternsWithExpression lookupTable usedNames pat expr =
     let
@@ -201,6 +206,7 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                 { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
                 , usefulPatterns : List ( Node Pattern, Node Expression )
                 , uselessExpressions : List (Node Expression)
+                , ignoredPatterns : List ( Node Pattern, Node Expression )
                 }
         go =
             pairPatternsWithExpression lookupTable usedNames
@@ -212,19 +218,22 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                 { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
                 , usefulPatterns : List ( Node Pattern, Node Expression )
                 , uselessExpressions : List (Node Expression)
+                , ignoredPatterns : List ( Node Pattern, Node Expression )
                 }
         goMultiple ps es =
             List.map2 go ps es
                 |> List.foldr
-                    (\{ uselessPatterns, usefulPatterns, uselessExpressions } acc ->
+                    (\{ uselessPatterns, usefulPatterns, uselessExpressions, ignoredPatterns } acc ->
                         { uselessPatterns = uselessPatterns ++ acc.uselessPatterns
                         , usefulPatterns = usefulPatterns ++ acc.usefulPatterns
                         , uselessExpressions = uselessExpressions ++ acc.uselessExpressions
+                        , ignoredPatterns = ignoredPatterns ++ acc.ignoredPatterns
                         }
                     )
                     { uselessPatterns = []
                     , usefulPatterns = []
                     , uselessExpressions = []
+                    , ignoredPatterns = []
                     }
 
         done :
@@ -233,6 +242,7 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                 { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
                 , usefulPatterns : List ( Node Pattern, Node Expression )
                 , uselessExpressions : List (Node Expression)
+                , ignoredPatterns : List ( Node Pattern, Node Expression )
                 }
         done isUnit =
             if isUseful pat then
@@ -240,6 +250,7 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                 { uselessPatterns = []
                 , usefulPatterns = [ ( pat, expr ) ]
                 , uselessExpressions = []
+                , ignoredPatterns = []
                 }
 
             else
@@ -247,6 +258,7 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                 { uselessPatterns = [ { isUnit = isUnit, pattern = pat, expression = expr } ]
                 , usefulPatterns = []
                 , uselessExpressions = []
+                , ignoredPatterns = []
                 }
 
         isUseful : Node Pattern -> Bool
