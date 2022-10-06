@@ -1,5 +1,6 @@
 module NoSinglePatternCaseTest exposing (all)
 
+import Dependencies.Dependency
 import NoSinglePatternCase
     exposing
         ( andIfAsPatternRequired
@@ -19,7 +20,9 @@ import NoSinglePatternCase
         , rule
         , useAsPattern
         )
+import Review.Project exposing (addDependency)
 import Review.Test
+import Review.Test.Dependencies exposing (projectWithElmCore)
 import Test exposing (Test, describe, test)
 
 
@@ -98,6 +101,115 @@ type Date = Date Int
 update : Date -> Int -> Int
 update (Date j) i =
     i + j
+"""
+                        ]
+        , test "does flag type from other module" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Date = Date Int
+"""
+                , """module B exposing (..)
+
+import A
+
+update : A.Date -> Int -> Int
+update date i =
+    case date of
+        A.Date j ->
+            i + j
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (rule fixInArgument)
+                    |> Review.Test.expectErrorsForModules
+                        [ ( "B"
+                          , [ error "A.Date j"
+                                |> Review.Test.whenFixed """module B exposing (..)
+
+import A
+
+update : A.Date -> Int -> Int
+update (A.Date j) i =
+    i + j
+"""
+                            ]
+                          )
+                        ]
+        , test "does not flag non-opaque type from other module" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Msg = ThingClicked
+"""
+                , """module B exposing (..)
+
+import A
+
+update : A.Msg -> Int -> Int
+update msg i =
+    case msg of
+        A.ThingClicked ->
+            i + 1
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (rule fixInArgument)
+                    |> Review.Test.expectNoErrors
+        , test "does flag wrapped type from dependency" <|
+            \() ->
+                """module A exposing (..)
+
+import Dependency exposing (Wrapped(..))
+
+update : Wrapped -> Int -> Int
+update wrapped i =
+    case wrapped of
+        Wrapped j ->
+            i + j
+"""
+                    |> Review.Test.runWithProjectData
+                        (projectWithElmCore
+                            |> addDependency Dependencies.Dependency.dependency
+                        )
+                        (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "Wrapped j"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+import Dependency exposing (Wrapped(..))
+
+update : Wrapped -> Int -> Int
+update (Wrapped j) i =
+    i + j
+"""
+                        ]
+        , test "does flag non-wrapped type from dependency" <|
+            \() ->
+                """module A exposing (..)
+
+import Dependency exposing (Msg(..))
+
+update : Msg -> Int -> Int
+update msg i =
+    case msg of
+        ThingClicked ->
+            i + 1
+"""
+                    |> Review.Test.runWithProjectData
+                        (projectWithElmCore
+                            |> addDependency Dependencies.Dependency.dependency
+                        )
+                        (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "ThingClicked"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+import Dependency exposing (Msg(..))
+
+update : Msg -> Int -> Int
+update msg i =
+    i + 1
 """
                         ]
         , test "name must be exact" <|
