@@ -57,6 +57,7 @@ sake of annotation, should it be necessary.
 import Dict exposing (Dict)
 import Elm.Syntax.Declaration exposing (Declaration(..))
 import Elm.Syntax.Expression exposing (Expression(..), LetBlock, LetDeclaration(..))
+import Elm.Syntax.ModuleName exposing (ModuleName)
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern)
 import Elm.Syntax.Range as Range exposing (Range)
@@ -206,6 +207,7 @@ checking all for `case`s.
 moduleVisitor : Config fixBy -> Rule.ModuleRuleSchema {} ModuleContext -> Rule.ModuleRuleSchema { hasAtLeastOneVisitor : () } ModuleContext
 moduleVisitor config schema =
     schema
+        |> Rule.withDeclarationListVisitor (\ds c -> ( [], declarationListVisitor config ds c ))
         |> Rule.withDeclarationEnterVisitor (checkDeclaration config)
 
 
@@ -230,7 +232,7 @@ fromModuleToProject =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\extractSourceCode lookupTable moduleName projectContext ->
+        (\extractSourceCode lookupTable projectContext ->
             { extractSourceCode = extractSourceCode
             , lookupTable = lookupTable
             , nonWrappedTypes = projectContext.nonWrappedTypes
@@ -238,7 +240,6 @@ fromProjectToModule =
         )
         |> Rule.withSourceCodeExtractor
         |> Rule.withModuleNameLookupTable
-        |> Rule.withModuleName
 
 
 {-| Combine `ProjectContext`s.
@@ -248,6 +249,54 @@ foldProjectContexts newContext prevContext =
     { nonWrappedTypes =
         Dict.union newContext.nonWrappedTypes prevContext.nonWrappedTypes
     }
+
+
+{-| Visit declarations, storing any types that should not be reduced.
+-}
+declarationListVisitor : Config fixBy -> List (Node Declaration) -> ModuleContext -> ModuleContext
+declarationListVisitor (Config { reportAllTypes }) declarations context =
+    let
+        getNonWrappedType : Node Declaration -> Maybe String
+        getNonWrappedType node =
+            case Node.value node of
+                CustomTypeDeclaration { name, constructors } ->
+                    case constructors of
+                        [ c ] ->
+                            let
+                                n : String
+                                n =
+                                    Node.value (Node.value c).name
+                            in
+                            if n /= Node.value name then
+                                Just n
+
+                            else
+                                Nothing
+
+                        _ ->
+                            -- More than one constructor can't be a wrapped type
+                            Nothing
+
+                _ ->
+                    Nothing
+    in
+    if reportAllTypes then
+        -- Don't store any if we're reporting everything
+        context
+
+    else
+        -- Find non-wrapped custom types that were defined in the module, and store them in the context.
+        { context
+            | nonWrappedTypes =
+                List.filterMap getNonWrappedType declarations
+                    |> (\ts ->
+                            if List.isEmpty ts then
+                                context.nonWrappedTypes
+
+                            else
+                                Dict.insert [] (Set.fromList ts) context.nonWrappedTypes
+                       )
+        }
 
 
 {-| Configure the rule, determining how automatic fixes are generated.
