@@ -173,6 +173,7 @@ rule config =
             , fromModuleToProject = fromModuleToProject
             , foldProjectContexts = foldProjectContexts
             }
+        |> Rule.withContextFromImportedModules
         |> Rule.fromProjectRuleSchema
 
 
