@@ -166,10 +166,14 @@ elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example/fix-
 -}
 rule : Config fixBy -> Rule
 rule config =
-    Rule.newModuleRuleSchemaUsingContextCreator "NoSinglePatternCase" initialContext
-        |> Rule.withDeclarationEnterVisitor
-            (checkDeclaration config)
-        |> Rule.fromModuleRuleSchema
+    Rule.newProjectRuleSchema "NoSinglePatternCase" initialContext
+        |> Rule.withModuleVisitor (moduleVisitor config)
+        |> Rule.withModuleContextUsingContextCreator
+            { fromProjectToModule = fromProjectToModule
+            , fromModuleToProject = fromModuleToProject
+            , foldProjectContexts = foldProjectContexts
+            }
+        |> Rule.fromProjectRuleSchema
 
 
 {-| Module context for the rule.
@@ -180,14 +184,59 @@ type alias ModuleContext =
     }
 
 
-{-| Create an initial context with source code extractor.
+{-| Project context for the rule.
 -}
-initialContext : Rule.ContextCreator () ModuleContext
+type alias ProjectContext =
+    {}
+
+
+{-| The initial project context.
+-}
+initialContext : ProjectContext
 initialContext =
+    {}
+
+
+{-| Visit each module, first getting types from all declarations and then
+checking all for `case`s.
+-}
+moduleVisitor : Config fixBy -> Rule.ModuleRuleSchema {} ModuleContext -> Rule.ModuleRuleSchema { hasAtLeastOneVisitor : () } ModuleContext
+moduleVisitor config schema =
+    schema
+        |> Rule.withDeclarationEnterVisitor (checkDeclaration config)
+
+
+{-| Create a `ProjectContext` from a `ModuleContext`.
+-}
+fromModuleToProject : Rule.ContextCreator ModuleContext ProjectContext
+fromModuleToProject =
     Rule.initContextCreator
-        (\extractSourceCode lookupTable () -> { extractSourceCode = extractSourceCode, lookupTable = lookupTable })
+        (\moduleContext ->
+            {}
+        )
+
+
+{-| Create a `ModuleContext` from a `ProjectContext`.
+-}
+fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
+fromProjectToModule =
+    Rule.initContextCreator
+        (\extractSourceCode lookupTable projectContext ->
+            -- , customTypes = projectContext.customTypes
+            -- , moduleName = String.join "." <| Rule.moduleNameFromMetadata metadata
+            { extractSourceCode = extractSourceCode
+            , lookupTable = lookupTable
+            }
+        )
         |> Rule.withSourceCodeExtractor
         |> Rule.withModuleNameLookupTable
+
+
+{-| Combine `ProjectContext`s.
+-}
+foldProjectContexts : ProjectContext -> ProjectContext -> ProjectContext
+foldProjectContexts newContext prevContext =
+    {}
 
 
 {-| Configure the rule, determining how automatic fixes are generated.
