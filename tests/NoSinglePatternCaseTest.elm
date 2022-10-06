@@ -220,7 +220,7 @@ type Msg1 = WrappedMsg1
 
 type Msg2 = Msg2Wrapped
 
-update : Msg1 -> -> Msg2Int -> Int
+update : Msg1 -> Msg2 -> Int
 update msg1 msg2 i =
     case (msg1, msg2) of
         (WrappedMsg1, Msg2Wrapped) ->
@@ -279,12 +279,13 @@ update msg i =
                         )
                     |> Review.Test.expectErrors
                         [ error "ThingieClicked"
+                            |> Review.Test.atExactly { start = { row = 8, column = 9 }, end = { row = 8, column = 23 } }
                             |> Review.Test.whenFixed """module A exposing (..)
 
 type Msg = ThingieClicked
 
 update : Msg -> Int -> Int
-update ThingieClicked i =
+update msg i =
     i + 1
 """
                         ]
