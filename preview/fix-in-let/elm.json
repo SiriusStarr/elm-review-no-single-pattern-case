@@ -12,7 +12,7 @@
             "elm-community/list-extra": "8.6.0",
             "elm-community/maybe-extra": "5.3.0",
             "elm-community/result-extra": "2.4.0",
-            "jfmengels/elm-review": "2.5.0",
+            "jfmengels/elm-review": "2.8.0",
             "stil4m/elm-syntax": "7.2.8"
         },
         "indirect": {
