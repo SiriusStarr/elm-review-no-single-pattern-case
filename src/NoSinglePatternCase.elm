@@ -1021,17 +1021,24 @@ checkExpression config ({ bindings } as context) expressionNode =
                         }
                         p
                         caseBlock.expression
-                        |> (\destructuring ->
-                                { context = context
-                                , outputExpression = e
-                                , caseRange = Node.range expressionNode
-                                , destructuring = destructuring
-                                , errorRange = Node.range p
-                                }
+                        |> (\({ removableBindings, usefulPatterns, removedExpressions } as destructuring) ->
+                                if List.isEmpty removableBindings && List.isEmpty usefulPatterns && List.isEmpty removedExpressions then
+                                    -- No error if it is fully ignorable
+                                    []
+
+                                else
+                                    -- Report error and rewrite case
+                                    [ singlePatternCaseError config
+                                        { context = context
+                                        , outputExpression = e
+                                        , caseRange = Node.range expressionNode
+                                        , destructuring = destructuring
+                                        , errorRange = Node.range p
+                                        }
+                                    ]
                            )
-                        |> singlePatternCaseError config
                         -- Add pattern match bindings and descend into output expression
-                        |> (\err -> err :: go Nothing (bindingsInPattern e p) e)
+                        |> (\err -> err ++ go Nothing (bindingsInPattern e p) e)
 
                 multipleCases ->
                     multipleCases
