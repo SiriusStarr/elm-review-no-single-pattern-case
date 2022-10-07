@@ -1015,6 +1015,7 @@ checkExpression config ({ bindings } as context) expressionNode =
                 [ ( p, e ) ] ->
                     reduceDestructuring
                         { bindings = context.bindings
+                        , nonWrappedTypes = context.moduleContext.nonWrappedTypes
                         , lookupTable = context.moduleContext.lookupTable
                         , outputExpression = e
                         }

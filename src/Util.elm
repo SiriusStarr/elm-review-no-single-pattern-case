@@ -18,6 +18,7 @@ module Util exposing
 import Dict exposing (Dict)
 import Dict.Extra as DictX
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..), RecordSetter)
+import Elm.Syntax.ModuleName exposing (ModuleName)
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern(..))
 import Elm.Syntax.Range exposing (Range)
@@ -162,13 +163,14 @@ simplest forms.
 reduceDestructuring :
     { bindings : Dict String Binding
     , lookupTable : ModuleNameLookupTable
+    , nonWrappedTypes : Dict ModuleName (Set String)
     , outputExpression : Node Expression
     }
     -> Node Pattern
     -> Node Expression
     -> Destructuring
-reduceDestructuring { bindings, outputExpression, lookupTable } pattern expression =
-    pairPatternsWithExpression lookupTable (namesUsedInExpression outputExpression) pattern expression
+reduceDestructuring { bindings, nonWrappedTypes, outputExpression, lookupTable } pattern expression =
+    pairPatternsWithExpression lookupTable nonWrappedTypes (namesUsedInExpression outputExpression) pattern expression
         |> (\{ uselessPatterns, usefulPatterns, uselessExpressions, ignoredPatterns } ->
                 let
                     allUselessExpressions : List (Node Expression)
@@ -188,6 +190,7 @@ expressions.
 -}
 pairPatternsWithExpression :
     ModuleNameLookupTable
+    -> Dict ModuleName (Set String)
     -> Set String
     -> Node Pattern
     -> Node Expression
@@ -197,7 +200,7 @@ pairPatternsWithExpression :
         , uselessExpressions : List (Node Expression)
         , ignoredPatterns : List ( Node Pattern, Node Expression )
         }
-pairPatternsWithExpression lookupTable usedNames pat expr =
+pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
     let
         go :
             Node Pattern
@@ -209,7 +212,7 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                 , ignoredPatterns : List ( Node Pattern, Node Expression )
                 }
         go =
-            pairPatternsWithExpression lookupTable usedNames
+            pairPatternsWithExpression lookupTable nonWrappedTypes usedNames
 
         goMultiple :
             List (Node Pattern)
@@ -260,6 +263,28 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                 , uselessExpressions = []
                 , ignoredPatterns = []
                 }
+
+        ignoreIfNonWrapped :
+            String
+            ->
+                Maybe
+                    { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
+                    , usefulPatterns : List ( Node Pattern, Node Expression )
+                    , uselessExpressions : List (Node Expression)
+                    , ignoredPatterns : List ( Node Pattern, Node Expression )
+                    }
+        ignoreIfNonWrapped constructorName =
+            ModuleNameLookupTable.moduleNameFor lookupTable pat
+                |> Maybe.andThen (\mn -> Dict.get mn nonWrappedTypes)
+                |> MaybeX.filter (Set.member constructorName)
+                |> Maybe.map
+                    (\_ ->
+                        { uselessPatterns = []
+                        , usefulPatterns = []
+                        , uselessExpressions = []
+                        , ignoredPatterns = [ ( pat, expr ) ]
+                        }
+                    )
 
         isUseful : Node Pattern -> Bool
         isUseful p =
@@ -373,13 +398,14 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
             -- should almost never show up
             done False
 
-        ( NamedPattern _ [], _ ) ->
+        ( NamedPattern { name } [], _ ) ->
             -- No sub-patterns, so this is terminal
-            done False
+            ignoreIfNonWrapped name
+                |> MaybeX.withDefaultLazy (\() -> done False)
 
         ( NamedPattern { name } ps, Application exprs ) ->
             ListX.uncons exprs
-                |> MaybeX.unpack (\() -> done False)
+                |> Maybe.andThen
                     (\( e, es ) ->
                         case Node.value e of
                             FunctionOrValue _ eName ->
@@ -392,24 +418,27 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                                                 |> Maybe.withDefault False
                                            )
                                 then
-                                    goMultiple ps es
+                                    Just <| goMultiple ps es
 
                                 else
                                     -- Names aren't a match
-                                    done False
+                                    Nothing
 
                             _ ->
                                 -- It's not worth it to try to reduce the few other cases we
                                 -- potentially could here, e.g. `let...in`, because they
                                 -- should almost never show up
-                                done False
+                                Nothing
                     )
+                |> MaybeX.orElseLazy (\() -> ignoreIfNonWrapped name)
+                |> MaybeX.withDefaultLazy (\() -> done False)
 
-        ( NamedPattern _ _, _ ) ->
+        ( NamedPattern { name } _, _ ) ->
             -- It's not worth it to try to reduce the few other cases we
             -- potentially could here, e.g. `let...in`, because they
             -- should almost never show up
-            done False
+            ignoreIfNonWrapped name
+                |> MaybeX.withDefaultLazy (\() -> done False)
 
         ( RecordPattern ps, RecordExpr es ) ->
             let
@@ -424,6 +453,7 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
             { uselessPatterns = List.map (\( p, e ) -> { isUnit = False, pattern = p, expression = e }) uselessPatterns
             , usefulPatterns = usefulPatterns
             , uselessExpressions = List.map (Tuple.second << Node.value) unused
+            , ignoredPatterns = []
             }
 
         ( RecordPattern _, _ ) ->
