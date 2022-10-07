@@ -257,7 +257,61 @@ type Msg2 = Msg2Wrapped Int
 foo : Msg1 -> Opaque -> Msg2 -> Int
 foo a (Opaque j) c =
     case (a, c) of
-        (WrappedMsg1 i, Msg2Wrapped k) -> i + j + k
+        (WrappedMsg1 i, Msg2Wrapped k) ->
+            i + j + k
+"""
+                        ]
+        , test "reduces mixed cases multiline" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+type Msg1 = WrappedMsg1 Int
+
+type Msg2 = Msg2Wrapped Int
+
+foo : Msg1 -> Opaque -> Msg2 -> Int
+foo a b c =
+    case
+        ( a
+            |> foo
+            |> bar
+        , b
+        , c
+        )
+    of
+        ( WrappedMsg1 i, Opaque j, Msg2Wrapped k ) ->
+            i
+                + j
+                + k
+                |> foo
+                |> bar
+                |> baz
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "( WrappedMsg1 i, Opaque j, Msg2Wrapped k )"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+type Msg1 = WrappedMsg1 Int
+
+type Msg2 = Msg2Wrapped Int
+
+foo : Msg1 -> Opaque -> Msg2 -> Int
+foo a (Opaque j) c =
+    case (a
+                |> foo
+                |> bar, c) of
+        (WrappedMsg1 i, Msg2Wrapped k) ->
+            i
+                    + j
+                    + k
+                    |> foo
+                    |> bar
+                    |> baz
 """
                         ]
         , test "flags with setting" <|
