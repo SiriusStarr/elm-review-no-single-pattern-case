@@ -31,6 +31,50 @@ elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example/fix-
 
 ## Changelog
 
+* `2.1.0`
+  * **New features:**
+    * ✨ Non-wrapped types are **now ignored by default**.  By default, only
+      constructors whose names are identical to their type are reported, along
+      with types imported from dependencies (since those aren't expected to be
+      iterated on).
+
+      ```elm
+      -- import the constructor `OutsideConstructor` from some other package
+      import SomeOutsidePackage exposing (OutsideType(..))
+
+      type Date =
+            -- Constructor has same name as type
+            Date Int
+
+      type Msg =
+            -- Constructor has different name than type
+            ThingieClicked
+
+      update1 : Date -> Int -> Int
+      update1 date i =
+          case date of
+              -- THIS CASE IS ALWAYS FLAGGED
+              Date j ->
+                  i + j
+
+      update2 : Msg -> Int -> Int
+      update2 msg i =
+          case msg of
+              -- THIS CASE IS NOT FLAGGED BY DEFAULT, IS FLAGGED WITH `reportAllCustomTypes`
+              ThingieClicked ->
+                  i + 1
+
+      update3 : OutsideType -> Int -> Int
+      update3 oType i =
+          case oType of
+              -- THIS CASE IS ALWAYS FLAGGED
+              OutsideConstructor j ->
+                  i + j
+      ```
+
+      To revert to version `2.0.2` behavior and before, use
+      [`reportAllCustomTypes`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/2.0.2/NoSinglePatternCase#reportAllCustomTypes)`
+
 * `2.0.2`
   * **New features:**
     * ✨ The rule is now capable of reducing the expressions and patterns of a
