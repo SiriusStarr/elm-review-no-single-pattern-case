@@ -1300,8 +1300,8 @@ makeFix (Config { fixBy, replaceUseless }) ({ destructuring } as info) =
                 )
                     ++ fs
             )
-        -- If fixes succeeded, replace the case block with the single expression
-        |> MaybeX.unwrap [] ((::) (replaceCaseBlockWithExpression info))
+        -- If fixes succeeded, replace the case block with the single expression (or any ignored patterns)
+        |> MaybeX.unwrap [] ((::) (rewriteCaseExpression info))
 
 
 {-| Given a `SinglePatternCase` and a list of patterns and expressions to
@@ -1659,8 +1659,8 @@ getValidLetBlock { context, destructuring, outputExpression } ps =
                    )
 
 
-{-| Replace the entirety of a single-pattern case with the part after the
-pattern, e.g.
+{-| Replace the entirety of a single-pattern case with a rewritten version that
+includes only ignored patterns (if any), e.g.
 
     f x =
         case x of
@@ -1673,8 +1673,37 @@ would become
         2
 
 -}
-replaceCaseBlockWithExpression : SinglePatternCase -> Fix
-replaceCaseBlockWithExpression { context, outputExpression, caseRange } =
-    Node.range outputExpression
-        |> context.moduleContext.extractSourceCode
-        |> Fix.replaceRangeBy caseRange
+rewriteCaseExpression : SinglePatternCase -> Fix
+rewriteCaseExpression { context, outputExpression, destructuring, caseRange } =
+    let
+        output : String
+        output =
+            Node.range outputExpression
+                |> context.moduleContext.extractSourceCode
+    in
+    case destructuring.ignoredPatterns of
+        [] ->
+            Fix.replaceRangeBy caseRange output
+
+        rem ->
+            let
+                ps : String
+                ps =
+                    List.map (context.moduleContext.extractSourceCode << Node.range << Tuple.first) rem
+                        |> String.join ", "
+
+                es : String
+                es =
+                    List.map (context.moduleContext.extractSourceCode << Node.range << Tuple.second) rem
+                        |> String.join ", "
+            in
+            String.concat
+                [ "case ("
+                , es
+                , ") of\n    ("
+                , ps
+                , ") ->\n        "
+                , output
+                ]
+                |> reindent caseRange.start.column
+                |> Fix.replaceRangeBy caseRange
