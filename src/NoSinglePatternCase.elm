@@ -483,9 +483,6 @@ expected to be iterated on). This setting changes behavior back to that of
 version `2.0.2` and earlier, where absolutely all single pattern cases are
 flagged by the rule, regardless of the types.
 
-For instance, _both_ of the cases in the following are flagged when this setting
-is used.
-
     -- import the constructor `OutsideConstructor` from some other package
 
 
@@ -509,7 +506,7 @@ is used.
     update2 : Msg -> Int -> Int
     update2 msg i =
         case msg of
-            -- THIS CASE IS NOT FLAGGED BY DEFAULT
+            -- THIS CASE IS NOT FLAGGED BY DEFAULT, IS FLAGGED WITH `reportAllCustomTypes`
             ThingieClicked ->
                 i + 1
 
