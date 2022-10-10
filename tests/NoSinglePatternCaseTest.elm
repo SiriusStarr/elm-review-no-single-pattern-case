@@ -635,6 +635,38 @@ pointless (A _) =
     True
 """
                         ]
+        , test "complex case" <|
+            \() ->
+                """module A exposing (..)
+
+type Date = Date Int
+
+type CreateThing = CreateThing
+
+foo : ( Date, CreateThing ) -> Bool
+foo x =
+    case x of
+        ( Date i, CreateThing ) ->
+            True
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "( Date i, CreateThing )"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Date = Date Int
+
+type CreateThing = CreateThing
+
+foo : ( Date, CreateThing ) -> Bool
+foo ( (Date _), CreateThing ) =
+    True
+"""
+                        ]
         , test "tuple no sub bindings" <|
             \() ->
                 """module A exposing (..)
