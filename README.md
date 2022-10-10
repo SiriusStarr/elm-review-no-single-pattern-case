@@ -73,7 +73,44 @@ elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example/fix-
       ```
 
       To revert to version `2.0.2` behavior and before, use
-      [`reportAllCustomTypes`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/2.0.2/NoSinglePatternCase#reportAllCustomTypes)`
+      [`reportAllCustomTypes`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/2.0.2/NoSinglePatternCase#reportAllCustomTypes)
+    * ✨ `replaceUnusedBindings` now replaces bindings with more specific patterns.  For example,
+
+      ```elm
+      type Date = Date Int
+
+      type CreateThing = CreateThing
+
+      foo : ( Date, CreateThing ) -> Bool
+      foo x =
+          case x of
+              ( Date i, CreateThing ) ->
+                  True
+
+      ```
+
+      will be fixed to
+
+      ```elm
+      type Date = Date Int
+
+      type CreateThing = CreateThing
+
+      foo : ( Date, CreateThing ) -> Bool
+      foo ( Date _, CreateThing ) =
+          True
+      ```
+
+      Since some IDEs do not recognize
+
+      ```elm
+      pointless CreateNewLet =
+          foo
+      ```
+
+      as valid Elm (even though it is), you can use
+      [`replaceUnusedBindingsWithWildcard`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/2.0.2/NoSinglePatternCase#replaceUnusedBindingsWithWildcard)
+      to revert to version `2.0.2` behavior and before.
 
 * `2.0.2`
   * **New features:**
