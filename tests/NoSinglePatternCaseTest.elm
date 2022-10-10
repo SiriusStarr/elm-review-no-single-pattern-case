@@ -549,6 +549,42 @@ pointless CreateNewLet =
     foo
 """
                         ]
+        , test "type from other module" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Date = Date Int
+"""
+                , """module B exposing (..)
+
+import A
+
+update : A.Date -> Int -> Int
+update date i =
+    case date of
+        A.Date _ ->
+            i
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrorsForModules
+                        [ ( "B"
+                          , [ error "A.Date _"
+                                |> Review.Test.whenFixed """module B exposing (..)
+
+import A
+
+update : A.Date -> Int -> Int
+update (A.Date _) i =
+    i
+"""
+                            ]
+                          )
+                        ]
         , test "complex pattern" <|
             \() ->
                 """module A exposing (..)
