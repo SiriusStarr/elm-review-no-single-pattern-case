@@ -3,7 +3,7 @@
     "name": "SiriusStarr/elm-review-no-single-pattern-case",
     "summary": "Provides elm-review rules to disallow single-pattern case expressions.",
     "license": "GPL-3.0",
-    "version": "2.0.2",
+    "version": "2.1.0",
     "exposed-modules": [
         "NoSinglePatternCase"
     ],
@@ -18,7 +18,7 @@
         "stil4m/elm-syntax": "7.2.8 <= v < 8.0.0"
     },
     "test-dependencies": {
-        "elm-explorations/test": "1.2.2 <= v < 2.0.0",
-        "elm/project-metadata-utils": "1.0.2 <= v < 2.0.0"
+        "elm/project-metadata-utils": "1.0.2 <= v < 2.0.0",
+        "elm-explorations/test": "1.2.2 <= v < 2.0.0"
     }
 }
