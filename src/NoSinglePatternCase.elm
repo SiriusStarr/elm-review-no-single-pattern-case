@@ -1,7 +1,7 @@
 module NoSinglePatternCase exposing
     ( rule
     , Config, fixInArgument, fixInLet
-    , reportAllCustomTypes, replaceUnusedBindings, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
+    , reportAllCustomTypes, replaceUnusedBindings, replaceUnusedBindingsWithWildcard, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
     , fail, createNewLet, useAsPattern, fixInArgumentInstead, andIfAsPatternRequired, andIfCannotDestructureAtArgument, fixInLetInstead, andIfNoLetExists
     , FixInArgument, FixInLet, UseArgInstead, UseLetInstead, CreateNewLet, Fail, UseAsPattern, UseAsPatternOrFailOr, CreateNewLetOr, UseArgOrCreateNewLetOrFail, UseLetOr, UseLetOrFail, UseAsPatternOrLetsOrFail, Either
     )
@@ -31,7 +31,7 @@ which name should be preferred.
 
 ## Customizing Config Behavior
 
-@docs reportAllCustomTypes, replaceUnusedBindings, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
+@docs reportAllCustomTypes, replaceUnusedBindings, replaceUnusedBindingsWithWildcard, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
 
 
 ## Config Behavior Options
@@ -318,9 +318,22 @@ that is actually used in the expression.
 type Config fixBy
     = Config
         { fixBy : FixBy
-        , replaceUseless : Bool
+        , replaceUseless : Maybe ReplaceUseless
         , reportAllTypes : Bool
         }
+
+
+{-| Specify how useless bindings are replaced.
+
+  - `ReplaceWithConstructorNames` -- Bindings are replaced with the constructor
+    names as specifically as possible.
+  - `ReplaceWithWildcardOnly` -- Bindings are simply replaced with the wildcard
+    pattern, `_`.
+
+-}
+type ReplaceUseless
+    = ReplaceWithConstructorNames
+    | ReplaceWithWildcardOnly
 
 
 {-| Phantom type for `Config fixBy`.
@@ -389,7 +402,7 @@ fixInArgument =
                 { ifAsPatternNeeded = useAsPattern
                 , ifCannotDestructure = fail
                 }
-        , replaceUseless = False
+        , replaceUseless = Nothing
         , reportAllTypes = False
         }
 
@@ -472,7 +485,7 @@ fixInLet : Config FixInLet
 fixInLet =
     Config
         { fixBy = DestructureInLet { ifNoLetBlock = createNewLet }
-        , replaceUseless = False
+        , replaceUseless = Nothing
         , reportAllTypes = False
         }
 
@@ -542,7 +555,8 @@ bind any name that is actually used in the expression, e.g.
 
 The rule will always provide fixes for such cases but by default will not
 replace the binding used in the `case...of` expression. This option configures
-the rule to replace such bindings where possible. Fox example:
+the rule to replace such bindings where possible with the most specific option.
+For example:
 
     f unusedArg =
         case unusedArg of
@@ -554,13 +568,64 @@ will be fixed to
     f _ =
         True
 
+and
+
+    f x =
+        case x of
+            A ({ field1, field2 } as record) ->
+                List.map foo bar
+                    |> List.sum
+                    |> baz
+
+will be fixed to
+
+    f (A _) =
+        List.map foo bar
+            |> List.sum
+            |> baz
+
 This provides a more clear indication that the binding is unused. The binding
 will of course **not** be replaced if it used anywhere but in `case...of`.
 
 -}
 replaceUnusedBindings : Config fixBy -> Config fixBy
 replaceUnusedBindings (Config r) =
-    Config { r | replaceUseless = True }
+    Config { r | replaceUseless = Just ReplaceWithConstructorNames }
+
+
+{-| This setting changes behavior back to that of version `2.0.2` and earlier,
+where useless bindings are replaced by `_` (or `()`), not by the constructor
+name.
+
+For example,
+
+    f x =
+        case x of
+            A ({ field1, field2 } as record) ->
+                List.map foo bar
+                    |> List.sum
+                    |> baz
+
+will be fixed to
+
+    f _ =
+        List.map foo bar
+            |> List.sum
+            |> baz
+
+This is useful if you are reliant on an IDE that doesn't recognize
+
+    pointless CreateNewLet =
+        foo
+
+as valid Elm syntax. The downside is that you will not receive compiler
+warnings if the argument changes (e.g. if you add a new constructor to the
+type).
+
+-}
+replaceUnusedBindingsWithWildcard : Config fixBy -> Config fixBy
+replaceUnusedBindingsWithWildcard (Config r) =
+    Config { r | replaceUseless = Just ReplaceWithWildcardOnly }
 
 
 {-| Specify what to do if an `as` pattern would be required to destructure in
@@ -1296,12 +1361,8 @@ makeFix (Config { fixBy, replaceUseless }) ({ destructuring } as info) =
     )
         |> Maybe.map
             (\fs ->
-                (if replaceUseless then
-                    fixUselessBindings destructuring.removableBindings
-
-                 else
-                    []
-                )
+                -- Replace useless bindings if configured to do so
+                MaybeX.unwrap [] (\c -> fixUselessBindings c destructuring.removableBindings) replaceUseless
                     ++ fs
             )
         -- If fixes succeeded, replace the case block with the single expression (or any ignored patterns)
@@ -1449,18 +1510,28 @@ movePatternToBinding { moduleContext } ( pat, { requiredAsName, binding } ) =
 {-| Remove all bindings that are in the `case...of` expression that are not used
 elsewhere else.
 -}
-fixUselessBindings : List { isUnit : Bool, binding : Binding } -> List Fix
-fixUselessBindings =
-    List.map
-        (\{ isUnit, binding } ->
-            (if isUnit then
-                "()"
+fixUselessBindings : ReplaceUseless -> List { replaceWith : String, binding : Binding } -> List Fix
+fixUselessBindings replaceConfig bs =
+    case replaceConfig of
+        ReplaceWithConstructorNames ->
+            List.map
+                (\{ replaceWith, binding } ->
+                    Fix.replaceRangeBy binding.patternNodeRange replaceWith
+                )
+                bs
 
-             else
-                "_"
-            )
-                |> Fix.replaceRangeBy binding.patternNodeRange
-        )
+        ReplaceWithWildcardOnly ->
+            List.map
+                (\{ replaceWith, binding } ->
+                    (if replaceWith /= "()" then
+                        "_"
+
+                     else
+                        "()"
+                    )
+                        |> Fix.replaceRangeBy binding.patternNodeRange
+                )
+                bs
 
 
 {-| Given context, a pattern, the expression it destructures, and a list of
