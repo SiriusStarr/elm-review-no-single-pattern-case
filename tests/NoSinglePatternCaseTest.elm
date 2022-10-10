@@ -635,6 +635,56 @@ pointless (A _) =
     True
 """
                         ]
+        , test "tuple no sub bindings" <|
+            \() ->
+                """module A exposing (..)
+
+pointless : (Int, String) -> Bool
+pointless a =
+    case a of
+        (x, y) -> True
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "(x, y)"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+pointless : (Int, String) -> Bool
+pointless _ =
+    True
+"""
+                        ]
+        , test "tuple with sub bindings" <|
+            \() ->
+                """module A exposing (..)
+
+type A = A Int
+
+pointless : (Int, A) -> Bool
+pointless a =
+    case a of
+        (x, A i) -> True
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "(x, A i)"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type A = A Int
+
+pointless : (Int, A) -> Bool
+pointless ( _, (A _) ) =
+    True
+"""
+                        ]
         , test "single custom type with wildcard option" <|
             \() ->
                 """module A exposing (..)
