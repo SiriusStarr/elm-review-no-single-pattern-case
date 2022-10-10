@@ -195,7 +195,7 @@ pairPatternsWithExpression :
     -> Node Pattern
     -> Node Expression
     ->
-        { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
+        { uselessPatterns : List { replaceWith : String, pattern : Node Pattern, expression : Node Expression }
         , usefulPatterns : List ( Node Pattern, Node Expression )
         , uselessExpressions : List (Node Expression)
         , ignoredPatterns : List ( Node Pattern, Node Expression )
@@ -206,7 +206,7 @@ pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
             Node Pattern
             -> Node Expression
             ->
-                { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
+                { uselessPatterns : List { replaceWith : String, pattern : Node Pattern, expression : Node Expression }
                 , usefulPatterns : List ( Node Pattern, Node Expression )
                 , uselessExpressions : List (Node Expression)
                 , ignoredPatterns : List ( Node Pattern, Node Expression )
@@ -218,7 +218,7 @@ pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
             List (Node Pattern)
             -> List (Node Expression)
             ->
-                { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
+                { uselessPatterns : List { replaceWith : String, pattern : Node Pattern, expression : Node Expression }
                 , usefulPatterns : List ( Node Pattern, Node Expression )
                 , uselessExpressions : List (Node Expression)
                 , ignoredPatterns : List ( Node Pattern, Node Expression )
@@ -240,14 +240,14 @@ pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
                     }
 
         done :
-            Bool
+            ()
             ->
-                { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
+                { uselessPatterns : List { replaceWith : String, pattern : Node Pattern, expression : Node Expression }
                 , usefulPatterns : List ( Node Pattern, Node Expression )
                 , uselessExpressions : List (Node Expression)
                 , ignoredPatterns : List ( Node Pattern, Node Expression )
                 }
-        done isUnit =
+        done () =
             if isUseful pat then
                 -- Not useless
                 { uselessPatterns = []
@@ -258,7 +258,7 @@ pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
 
             else
                 -- Useless
-                { uselessPatterns = [ { isUnit = isUnit, pattern = pat, expression = expr } ]
+                { uselessPatterns = [ { replaceWith = uselessPatternToString pat, pattern = pat, expression = expr } ]
                 , usefulPatterns = []
                 , uselessExpressions = []
                 , ignoredPatterns = []
@@ -268,7 +268,7 @@ pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
             String
             ->
                 Maybe
-                    { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
+                    { uselessPatterns : List { replaceWith : String, pattern : Node Pattern, expression : Node Expression }
                     , usefulPatterns : List ( Node Pattern, Node Expression )
                     , uselessExpressions : List (Node Expression)
                     , ignoredPatterns : List ( Node Pattern, Node Expression )
@@ -302,88 +302,91 @@ pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
 
         ( AllPattern, _ ) ->
             -- Get the binding info if it's a terminal pattern
-            done False
+            done ()
 
         ( UnitPattern, _ ) ->
             -- Get the binding info if it's a terminal pattern
-            done True
+            done ()
 
         ( VarPattern _, _ ) ->
             -- Get the binding info if it's a terminal pattern
-            done False
+            done ()
 
         ( CharPattern _, _ ) ->
             -- Get the binding info if it's a terminal pattern
-            done False
+            done ()
 
         ( StringPattern _, _ ) ->
             -- Get the binding info if it's a terminal pattern
-            done False
+            done ()
 
         ( IntPattern _, _ ) ->
             -- Get the binding info if it's a terminal pattern
-            done False
+            done ()
 
         ( HexPattern _, _ ) ->
             -- Get the binding info if it's a terminal pattern
-            done False
+            done ()
 
         ( FloatPattern _, _ ) ->
             -- Get the binding info if it's a terminal pattern
-            done False
+            done ()
 
         ( _, UnitExpr ) ->
             -- Get the binding info if it's a terminal expression
-            done True
+            done ()
 
         ( _, Integer _ ) ->
             -- Get the binding info if it's a terminal expression
-            done False
+            done ()
 
         ( _, Hex _ ) ->
             -- Get the binding info if it's a terminal expression
-            done False
+            done ()
 
         ( _, Floatable _ ) ->
             -- Get the binding info if it's a terminal expression
-            done False
+            done ()
 
         ( _, Operator _ ) ->
             -- Get the binding info if it's a terminal expression
-            done False
+            done ()
 
         ( _, CharLiteral _ ) ->
             -- Get the binding info if it's a terminal expression
-            done False
+            done ()
 
         ( _, GLSLExpression _ ) ->
             -- Get the binding info if it's a terminal expression
-            done False
+            done ()
 
         ( _, Literal _ ) ->
             -- Get the binding info if it's a terminal expression
-            done False
+            done ()
 
         ( _, LambdaExpression _ ) ->
             -- Get the binding info if it's a terminal expression
-            done False
+            done ()
 
         ( UnConsPattern _ _, _ ) ->
             -- An uncons pattern can't occur in a single-pattern case,
             -- since there would have to always be at least the `[]`
             -- pattern as well.
-            done False
+            done ()
 
         ( ListPattern _, _ ) ->
             -- A list pattern can't occur in a single-pattern case,
             -- since there would have to always be an infinite length
             -- pattern as well.
-            done False
+            done ()
 
         ( AsPattern p n, _ ) ->
             if Set.member (Node.value n) usedNames then
-                -- As pattern is used, so cannot destructure further
-                done False
+                -- As pattern is used, so cannot destructure further.
+                --
+                -- Don't have to worry about the useless replacement, since we
+                -- know it's used.
+                done ()
 
             else
                 -- As pattern is useless, so recurse
@@ -394,14 +397,14 @@ pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
 
         ( TuplePattern _, _ ) ->
             -- It's not worth it to try to reduce the few other cases we
-            -- potentially could here, e.g. `let...in`, because they
-            -- should almost never show up
-            done False
+            -- potentially could here, e.g. `let...in`, because they should
+            -- almost never show up.
+            done ()
 
         ( NamedPattern { name } [], _ ) ->
             -- No sub-patterns, so this is terminal
             ignoreIfNonWrapped name
-                |> MaybeX.withDefaultLazy (\() -> done False)
+                |> MaybeX.withDefaultLazy done
 
         ( NamedPattern { name } ps, Application exprs ) ->
             ListX.uncons exprs
@@ -431,14 +434,14 @@ pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
                                 Nothing
                     )
                 |> MaybeX.orElseLazy (\() -> ignoreIfNonWrapped name)
-                |> MaybeX.withDefaultLazy (\() -> done False)
+                |> MaybeX.withDefaultLazy done
 
         ( NamedPattern { name } _, _ ) ->
             -- It's not worth it to try to reduce the few other cases we
             -- potentially could here, e.g. `let...in`, because they
             -- should almost never show up
             ignoreIfNonWrapped name
-                |> MaybeX.withDefaultLazy (\() -> done False)
+                |> MaybeX.withDefaultLazy done
 
         ( RecordPattern ps, RecordExpr es ) ->
             let
@@ -450,7 +453,7 @@ pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
                     List.map (Tuple.mapBoth (Node.map VarPattern) (Tuple.second << Node.value)) used
                         |> List.partition (isUseful << Tuple.first)
             in
-            { uselessPatterns = List.map (\( p, e ) -> { isUnit = False, pattern = p, expression = e }) uselessPatterns
+            { uselessPatterns = List.map (\( p, e ) -> { replaceWith = "_", pattern = p, expression = e }) uselessPatterns
             , usefulPatterns = usefulPatterns
             , uselessExpressions = List.map (Tuple.second << Node.value) unused
             , ignoredPatterns = []
@@ -460,7 +463,84 @@ pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
             -- It's not worth it to try to reduce the few other cases we
             -- potentially could here, e.g. record update, because they
             -- should almost never show up
-            done False
+            done ()
+
+
+{-| Given a pattern known to be useless, convert it into a string to replace its
+binding with.
+-}
+uselessPatternToString : Node Pattern -> String
+uselessPatternToString pat =
+    case Node.value pat of
+        ParenthesizedPattern p ->
+            -- Recurse if parenthesized
+            uselessPatternToString p
+
+        AllPattern ->
+            "_"
+
+        UnitPattern ->
+            "()"
+
+        VarPattern _ ->
+            "_"
+
+        CharPattern _ ->
+            "_"
+
+        StringPattern _ ->
+            "_"
+
+        IntPattern _ ->
+            "_"
+
+        HexPattern _ ->
+            "_"
+
+        FloatPattern _ ->
+            "_"
+
+        UnConsPattern _ _ ->
+            "_"
+
+        ListPattern _ ->
+            "_"
+
+        AsPattern p _ ->
+            -- Given that we have established that it's useless, we can descend into sub-pattern
+            uselessPatternToString p
+
+        TuplePattern ps ->
+            List.map uselessPatternToString ps
+                |> (\subps ->
+                        if List.any ((/=) "_") subps then
+                            "( " ++ String.join ", " subps ++ " )"
+
+                        else
+                            -- `elm-review` NoUnused doesn't like tuple patterns that don't have at least one non-"_" subpattern
+                            "_"
+                   )
+
+        NamedPattern { moduleName, name } [] ->
+            -- No sub-patterns, so this is terminal
+            String.join "." <| moduleName ++ [ name ]
+
+        NamedPattern { moduleName, name } ps ->
+            List.map uselessPatternToString ps
+                |> (\subps ->
+                        String.concat
+                            [ "("
+                            , String.join "." <| moduleName ++ [ name ]
+                            , " "
+                            , String.join " " subps
+                            , ")"
+                            ]
+                   )
+
+        RecordPattern _ ->
+            -- Note that we never replace record pattern with `{}` because
+            -- `elm-review` NoUnused doesn't like it.
+            "_"
 
 
 {-| Given a record pattern and a record literal, return paired patterns and
