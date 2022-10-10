@@ -86,7 +86,6 @@ elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example/fix-
           case x of
               ( Date i, CreateThing ) ->
                   True
-
       ```
 
       will be fixed to
