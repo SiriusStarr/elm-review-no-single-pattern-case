@@ -1361,12 +1361,8 @@ makeFix (Config { fixBy, replaceUseless }) ({ destructuring } as info) =
     )
         |> Maybe.map
             (\fs ->
-                (if replaceUseless /= Nothing then
-                    fixUselessBindings destructuring.removableBindings
-
-                 else
-                    []
-                )
+                -- Replace useless bindings if configured to do so
+                MaybeX.unwrap [] (\c -> fixUselessBindings c destructuring.removableBindings) replaceUseless
                     ++ fs
             )
         -- If fixes succeeded, replace the case block with the single expression (or any ignored patterns)
@@ -1514,12 +1510,28 @@ movePatternToBinding { moduleContext } ( pat, { requiredAsName, binding } ) =
 {-| Remove all bindings that are in the `case...of` expression that are not used
 elsewhere else.
 -}
-fixUselessBindings : List { replaceWith : String, binding : Binding } -> List Fix
-fixUselessBindings =
-    List.map
-        (\{ replaceWith, binding } ->
-            Fix.replaceRangeBy binding.patternNodeRange replaceWith
-        )
+fixUselessBindings : ReplaceUseless -> List { replaceWith : String, binding : Binding } -> List Fix
+fixUselessBindings replaceConfig bs =
+    case replaceConfig of
+        ReplaceWithConstructorNames ->
+            List.map
+                (\{ replaceWith, binding } ->
+                    Fix.replaceRangeBy binding.patternNodeRange replaceWith
+                )
+                bs
+
+        ReplaceWithWildcardOnly ->
+            List.map
+                (\{ replaceWith, binding } ->
+                    (if replaceWith /= "()" then
+                        "_"
+
+                     else
+                        "()"
+                    )
+                        |> Fix.replaceRangeBy binding.patternNodeRange
+                )
+                bs
 
 
 {-| Given context, a pattern, the expression it destructures, and a list of
