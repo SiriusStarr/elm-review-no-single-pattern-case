@@ -1,7 +1,7 @@
 module NoSinglePatternCase exposing
     ( rule
     , Config, fixInArgument, fixInLet
-    , replaceUnusedBindings, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
+    , reportAllCustomTypes, replaceUnusedBindings, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
     , fail, createNewLet, useAsPattern, fixInArgumentInstead, andIfAsPatternRequired, andIfCannotDestructureAtArgument, fixInLetInstead, andIfNoLetExists
     , FixInArgument, FixInLet, UseArgInstead, UseLetInstead, CreateNewLet, Fail, UseAsPattern, UseAsPatternOrFailOr, CreateNewLetOr, UseArgOrCreateNewLetOrFail, UseLetOr, UseLetOrFail, UseAsPatternOrLetsOrFail, Either
     )
@@ -31,7 +31,7 @@ which name should be preferred.
 
 ## Customizing Config Behavior
 
-@docs replaceUnusedBindings, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
+@docs reportAllCustomTypes, replaceUnusedBindings, ifAsPatternRequired, ifCannotDestructureAtArgument, ifNoLetExists
 
 
 ## Config Behavior Options
@@ -57,6 +57,7 @@ sake of annotation, should it be necessary.
 import Dict exposing (Dict)
 import Elm.Syntax.Declaration exposing (Declaration(..))
 import Elm.Syntax.Expression exposing (Expression(..), LetBlock, LetDeclaration(..))
+import Elm.Syntax.ModuleName exposing (ModuleName)
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern)
 import Elm.Syntax.Range as Range exposing (Range)
@@ -137,6 +138,11 @@ or
 
 ## Success
 
+Single patterns with constructors that do not match their type name, e.g. `type
+Msg = ButtonClicked`, are allowed by default, unless they are imported from
+dependencies (as those types are not expected to be iterated on). This behavior
+can be changed with [`reportAllCustomTypes`](#reportAllCustomTypes).
+
 Any case expression with more than one pattern match will not be reported.
 Consider using [`jfmengels/elm-review-simplify`](https://package.elm-lang.org/packages/jfmengels/elm-review-simplify/latest)
 to detect unnecessary multi-pattern cases.
@@ -161,10 +167,15 @@ elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example/fix-
 -}
 rule : Config fixBy -> Rule
 rule config =
-    Rule.newModuleRuleSchemaUsingContextCreator "NoSinglePatternCase" initialContext
-        |> Rule.withDeclarationEnterVisitor
-            (checkDeclaration config)
-        |> Rule.fromModuleRuleSchema
+    Rule.newProjectRuleSchema "NoSinglePatternCase" initialContext
+        |> Rule.withModuleVisitor (moduleVisitor config)
+        |> Rule.withModuleContextUsingContextCreator
+            { fromProjectToModule = fromProjectToModule
+            , fromModuleToProject = fromModuleToProject
+            , foldProjectContexts = foldProjectContexts
+            }
+        |> Rule.withContextFromImportedModules
+        |> Rule.fromProjectRuleSchema
 
 
 {-| Module context for the rule.
@@ -172,17 +183,120 @@ rule config =
 type alias ModuleContext =
     { extractSourceCode : Range -> String
     , lookupTable : ModuleNameLookupTable
+    , nonWrappedTypes : Dict ModuleName (Set String)
     }
 
 
-{-| Create an initial context with source code extractor.
+{-| Project context for the rule.
 -}
-initialContext : Rule.ContextCreator () ModuleContext
+type alias ProjectContext =
+    { nonWrappedTypes : Dict ModuleName (Set String)
+    }
+
+
+{-| The initial project context.
+-}
+initialContext : ProjectContext
 initialContext =
+    { nonWrappedTypes = Dict.empty }
+
+
+{-| Visit each module, first getting types from all declarations and then
+checking all for `case`s.
+-}
+moduleVisitor : Config fixBy -> Rule.ModuleRuleSchema {} ModuleContext -> Rule.ModuleRuleSchema { hasAtLeastOneVisitor : () } ModuleContext
+moduleVisitor config schema =
+    schema
+        |> Rule.withDeclarationListVisitor (\ds c -> ( [], declarationListVisitor config ds c ))
+        |> Rule.withDeclarationEnterVisitor (checkDeclaration config)
+
+
+{-| Create a `ProjectContext` from a `ModuleContext`.
+-}
+fromModuleToProject : Rule.ContextCreator ModuleContext ProjectContext
+fromModuleToProject =
     Rule.initContextCreator
-        (\extractSourceCode lookupTable () -> { extractSourceCode = extractSourceCode, lookupTable = lookupTable })
+        (\moduleName moduleContext ->
+            { nonWrappedTypes =
+                moduleContext.nonWrappedTypes
+                    |> Dict.get []
+                    |> Maybe.withDefault Set.empty
+                    |> Dict.singleton moduleName
+            }
+        )
+        |> Rule.withModuleName
+
+
+{-| Create a `ModuleContext` from a `ProjectContext`.
+-}
+fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
+fromProjectToModule =
+    Rule.initContextCreator
+        (\extractSourceCode lookupTable projectContext ->
+            { extractSourceCode = extractSourceCode
+            , lookupTable = lookupTable
+            , nonWrappedTypes = projectContext.nonWrappedTypes
+            }
+        )
         |> Rule.withSourceCodeExtractor
         |> Rule.withModuleNameLookupTable
+
+
+{-| Combine `ProjectContext`s.
+-}
+foldProjectContexts : ProjectContext -> ProjectContext -> ProjectContext
+foldProjectContexts newContext prevContext =
+    { nonWrappedTypes =
+        Dict.union newContext.nonWrappedTypes prevContext.nonWrappedTypes
+    }
+
+
+{-| Visit declarations, storing any types that should not be reduced.
+-}
+declarationListVisitor : Config fixBy -> List (Node Declaration) -> ModuleContext -> ModuleContext
+declarationListVisitor (Config { reportAllTypes }) declarations context =
+    let
+        getNonWrappedType : Node Declaration -> Maybe String
+        getNonWrappedType node =
+            case Node.value node of
+                CustomTypeDeclaration { name, constructors } ->
+                    case constructors of
+                        [ c ] ->
+                            let
+                                n : String
+                                n =
+                                    Node.value (Node.value c).name
+                            in
+                            if n /= Node.value name then
+                                Just n
+
+                            else
+                                Nothing
+
+                        _ ->
+                            -- More than one constructor can't be a wrapped type
+                            Nothing
+
+                _ ->
+                    Nothing
+    in
+    if reportAllTypes then
+        -- Don't store any if we're reporting everything
+        context
+
+    else
+        -- Find non-wrapped custom types that were defined in the module, and store them in the context.
+        { context
+            | nonWrappedTypes =
+                List.filterMap getNonWrappedType declarations
+                    |> (\ts ->
+                            if List.isEmpty ts then
+                                context.nonWrappedTypes
+
+                            else
+                                Dict.insert [] (Set.fromList ts) context.nonWrappedTypes
+                       )
+        }
 
 
 {-| Configure the rule, determining how automatic fixes are generated.
@@ -191,6 +305,10 @@ The default `Config`s [`fixInArgument`](#fixInArgument) and
 [`fixInLet`](#fixInLet) should be used as reasonable defaults, with more
 customization detailed in those sections.
 
+The behavior of the rule with constructors that don't match their type name can
+be configured via [`reportAllCustomTypes`](#reportAllCustomTypes). By default,
+only constructors with an identical name to their type are reported.
+
 The behavior of the rule in the context of useless single pattern cases can also
 be configured via [`replaceUnusedBindings`](#replaceUnusedBindings). A single
 pattern case is considered to be useless if its pattern does not bind any name
@@ -198,7 +316,11 @@ that is actually used in the expression.
 
 -}
 type Config fixBy
-    = Config { fixBy : FixBy, replaceUseless : Bool }
+    = Config
+        { fixBy : FixBy
+        , replaceUseless : Bool
+        , reportAllTypes : Bool
+        }
 
 
 {-| Phantom type for `Config fixBy`.
@@ -268,6 +390,7 @@ fixInArgument =
                 , ifCannotDestructure = fail
                 }
         , replaceUseless = False
+        , reportAllTypes = False
         }
 
 
@@ -350,7 +473,54 @@ fixInLet =
     Config
         { fixBy = DestructureInLet { ifNoLetBlock = createNewLet }
         , replaceUseless = False
+        , reportAllTypes = False
         }
+
+
+{-| By default, only constructors whose names are identical to their type are
+reported, along with types imported from dependencies (since those aren't
+expected to be iterated on). This setting changes behavior back to that of
+version `2.0.2` and earlier, where absolutely all single pattern cases are
+flagged by the rule, regardless of the types.
+
+    -- import the constructor `OutsideConstructor` from some other package
+
+
+    import SomeOutsidePackage exposing (OutsideType(..))
+
+    type Date
+        = -- Constructor has same name as type
+          Date Int
+
+    type Msg
+        = -- Constructor has different name than type
+          ThingieClicked
+
+    update1 : Date -> Int -> Int
+    update1 date i =
+        case date of
+            -- THIS CASE IS ALWAYS FLAGGED
+            Date j ->
+                i + j
+
+    update2 : Msg -> Int -> Int
+    update2 msg i =
+        case msg of
+            -- THIS CASE IS NOT FLAGGED BY DEFAULT, IS FLAGGED WITH `reportAllCustomTypes`
+            ThingieClicked ->
+                i + 1
+
+    update3 : OutsideType -> Int -> Int
+    update3 oType i =
+        case oType of
+            -- THIS CASE IS ALWAYS FLAGGED
+            OutsideConstructor j ->
+                i + j
+
+-}
+reportAllCustomTypes : Config fixBy -> Config fixBy
+reportAllCustomTypes (Config r) =
+    Config { r | reportAllTypes = True }
 
 
 {-| A single pattern case is considered to be useless if its pattern does not
@@ -842,22 +1012,30 @@ checkExpression config ({ bindings } as context) expressionNode =
                 [ ( p, e ) ] ->
                     reduceDestructuring
                         { bindings = context.bindings
+                        , nonWrappedTypes = context.moduleContext.nonWrappedTypes
                         , lookupTable = context.moduleContext.lookupTable
                         , outputExpression = e
                         }
                         p
                         caseBlock.expression
-                        |> (\destructuring ->
-                                { context = context
-                                , outputExpression = e
-                                , caseRange = Node.range expressionNode
-                                , destructuring = destructuring
-                                , errorRange = Node.range p
-                                }
+                        |> (\({ removableBindings, usefulPatterns, removedExpressions } as destructuring) ->
+                                if List.isEmpty removableBindings && List.isEmpty usefulPatterns && List.isEmpty removedExpressions then
+                                    -- No error if it is fully ignorable
+                                    []
+
+                                else
+                                    -- Report error and rewrite case
+                                    [ singlePatternCaseError config
+                                        { context = context
+                                        , outputExpression = e
+                                        , caseRange = Node.range expressionNode
+                                        , destructuring = destructuring
+                                        , errorRange = Node.range p
+                                        }
+                                    ]
                            )
-                        |> singlePatternCaseError config
                         -- Add pattern match bindings and descend into output expression
-                        |> (\err -> err :: go Nothing (bindingsInPattern e p) e)
+                        |> (\err -> err ++ go Nothing (bindingsInPattern e p) e)
 
                 multipleCases ->
                     multipleCases
@@ -1126,8 +1304,8 @@ makeFix (Config { fixBy, replaceUseless }) ({ destructuring } as info) =
                 )
                     ++ fs
             )
-        -- If fixes succeeded, replace the case block with the single expression
-        |> MaybeX.unwrap [] ((::) (replaceCaseBlockWithExpression info))
+        -- If fixes succeeded, replace the case block with the single expression (or any ignored patterns)
+        |> MaybeX.unwrap [] ((::) (rewriteCaseExpression info))
 
 
 {-| Given a `SinglePatternCase` and a list of patterns and expressions to
@@ -1485,8 +1663,8 @@ getValidLetBlock { context, destructuring, outputExpression } ps =
                    )
 
 
-{-| Replace the entirety of a single-pattern case with the part after the
-pattern, e.g.
+{-| Replace the entirety of a single-pattern case with a rewritten version that
+includes only ignored patterns (if any), e.g.
 
     f x =
         case x of
@@ -1499,8 +1677,37 @@ would become
         2
 
 -}
-replaceCaseBlockWithExpression : SinglePatternCase -> Fix
-replaceCaseBlockWithExpression { context, outputExpression, caseRange } =
-    Node.range outputExpression
-        |> context.moduleContext.extractSourceCode
-        |> Fix.replaceRangeBy caseRange
+rewriteCaseExpression : SinglePatternCase -> Fix
+rewriteCaseExpression { context, outputExpression, destructuring, caseRange } =
+    let
+        output : String
+        output =
+            Node.range outputExpression
+                |> context.moduleContext.extractSourceCode
+    in
+    case destructuring.ignoredPatterns of
+        [] ->
+            Fix.replaceRangeBy caseRange output
+
+        rem ->
+            let
+                ps : String
+                ps =
+                    List.map (context.moduleContext.extractSourceCode << Node.range << Tuple.first) rem
+                        |> String.join ", "
+
+                es : String
+                es =
+                    List.map (context.moduleContext.extractSourceCode << Node.range << Tuple.second) rem
+                        |> String.join ", "
+            in
+            String.concat
+                [ "case ("
+                , es
+                , ") of\n    ("
+                , ps
+                , ") ->\n        "
+                , output
+                ]
+                |> reindent caseRange.start.column
+                |> Fix.replaceRangeBy caseRange

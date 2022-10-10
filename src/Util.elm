@@ -18,6 +18,7 @@ module Util exposing
 import Dict exposing (Dict)
 import Dict.Extra as DictX
 import Elm.Syntax.Expression exposing (Expression(..), LetDeclaration(..), RecordSetter)
+import Elm.Syntax.ModuleName exposing (ModuleName)
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern(..))
 import Elm.Syntax.Range exposing (Range)
@@ -144,12 +145,15 @@ namesUsedInExpression expr =
     directly destructure.
   - `removedExpressions` -- These are expressions that will be removed when the
     `case` is rewritten, so we can ignore the use of anything in them.
+  - `ignoredPatterns` -- Patterns that we were told to not reduce, so they will
+    be left as a `case...of`.
 
 -}
 type alias Destructuring =
     { removableBindings : List { isUnit : Bool, binding : Binding }
     , usefulPatterns : List ( Node Pattern, Node Expression )
     , removedExpressions : List (Node Expression)
+    , ignoredPatterns : List ( Node Pattern, Node Expression )
     }
 
 
@@ -159,14 +163,15 @@ simplest forms.
 reduceDestructuring :
     { bindings : Dict String Binding
     , lookupTable : ModuleNameLookupTable
+    , nonWrappedTypes : Dict ModuleName (Set String)
     , outputExpression : Node Expression
     }
     -> Node Pattern
     -> Node Expression
     -> Destructuring
-reduceDestructuring { bindings, outputExpression, lookupTable } pattern expression =
-    pairPatternsWithExpression lookupTable (namesUsedInExpression outputExpression) pattern expression
-        |> (\{ uselessPatterns, usefulPatterns, uselessExpressions } ->
+reduceDestructuring { bindings, nonWrappedTypes, outputExpression, lookupTable } pattern expression =
+    pairPatternsWithExpression lookupTable nonWrappedTypes (namesUsedInExpression outputExpression) pattern expression
+        |> (\{ uselessPatterns, usefulPatterns, uselessExpressions, ignoredPatterns } ->
                 let
                     allUselessExpressions : List (Node Expression)
                     allUselessExpressions =
@@ -175,6 +180,7 @@ reduceDestructuring { bindings, outputExpression, lookupTable } pattern expressi
                 { removableBindings = removableBindings bindings allUselessExpressions uselessPatterns
                 , usefulPatterns = usefulPatterns
                 , removedExpressions = allUselessExpressions
+                , ignoredPatterns = ignoredPatterns
                 }
            )
 
@@ -184,6 +190,7 @@ expressions.
 -}
 pairPatternsWithExpression :
     ModuleNameLookupTable
+    -> Dict ModuleName (Set String)
     -> Set String
     -> Node Pattern
     -> Node Expression
@@ -191,8 +198,9 @@ pairPatternsWithExpression :
         { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
         , usefulPatterns : List ( Node Pattern, Node Expression )
         , uselessExpressions : List (Node Expression)
+        , ignoredPatterns : List ( Node Pattern, Node Expression )
         }
-pairPatternsWithExpression lookupTable usedNames pat expr =
+pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
     let
         go :
             Node Pattern
@@ -201,9 +209,10 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                 { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
                 , usefulPatterns : List ( Node Pattern, Node Expression )
                 , uselessExpressions : List (Node Expression)
+                , ignoredPatterns : List ( Node Pattern, Node Expression )
                 }
         go =
-            pairPatternsWithExpression lookupTable usedNames
+            pairPatternsWithExpression lookupTable nonWrappedTypes usedNames
 
         goMultiple :
             List (Node Pattern)
@@ -212,19 +221,22 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                 { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
                 , usefulPatterns : List ( Node Pattern, Node Expression )
                 , uselessExpressions : List (Node Expression)
+                , ignoredPatterns : List ( Node Pattern, Node Expression )
                 }
         goMultiple ps es =
             List.map2 go ps es
                 |> List.foldr
-                    (\{ uselessPatterns, usefulPatterns, uselessExpressions } acc ->
+                    (\{ uselessPatterns, usefulPatterns, uselessExpressions, ignoredPatterns } acc ->
                         { uselessPatterns = uselessPatterns ++ acc.uselessPatterns
                         , usefulPatterns = usefulPatterns ++ acc.usefulPatterns
                         , uselessExpressions = uselessExpressions ++ acc.uselessExpressions
+                        , ignoredPatterns = ignoredPatterns ++ acc.ignoredPatterns
                         }
                     )
                     { uselessPatterns = []
                     , usefulPatterns = []
                     , uselessExpressions = []
+                    , ignoredPatterns = []
                     }
 
         done :
@@ -233,6 +245,7 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                 { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
                 , usefulPatterns : List ( Node Pattern, Node Expression )
                 , uselessExpressions : List (Node Expression)
+                , ignoredPatterns : List ( Node Pattern, Node Expression )
                 }
         done isUnit =
             if isUseful pat then
@@ -240,6 +253,7 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                 { uselessPatterns = []
                 , usefulPatterns = [ ( pat, expr ) ]
                 , uselessExpressions = []
+                , ignoredPatterns = []
                 }
 
             else
@@ -247,7 +261,30 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                 { uselessPatterns = [ { isUnit = isUnit, pattern = pat, expression = expr } ]
                 , usefulPatterns = []
                 , uselessExpressions = []
+                , ignoredPatterns = []
                 }
+
+        ignoreIfNonWrapped :
+            String
+            ->
+                Maybe
+                    { uselessPatterns : List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression }
+                    , usefulPatterns : List ( Node Pattern, Node Expression )
+                    , uselessExpressions : List (Node Expression)
+                    , ignoredPatterns : List ( Node Pattern, Node Expression )
+                    }
+        ignoreIfNonWrapped constructorName =
+            ModuleNameLookupTable.moduleNameFor lookupTable pat
+                |> Maybe.andThen (\mn -> Dict.get mn nonWrappedTypes)
+                |> MaybeX.filter (Set.member constructorName)
+                |> Maybe.map
+                    (\_ ->
+                        { uselessPatterns = []
+                        , usefulPatterns = []
+                        , uselessExpressions = []
+                        , ignoredPatterns = [ ( pat, expr ) ]
+                        }
+                    )
 
         isUseful : Node Pattern -> Bool
         isUseful p =
@@ -361,13 +398,14 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
             -- should almost never show up
             done False
 
-        ( NamedPattern _ [], _ ) ->
+        ( NamedPattern { name } [], _ ) ->
             -- No sub-patterns, so this is terminal
-            done False
+            ignoreIfNonWrapped name
+                |> MaybeX.withDefaultLazy (\() -> done False)
 
         ( NamedPattern { name } ps, Application exprs ) ->
             ListX.uncons exprs
-                |> MaybeX.unpack (\() -> done False)
+                |> Maybe.andThen
                     (\( e, es ) ->
                         case Node.value e of
                             FunctionOrValue _ eName ->
@@ -380,24 +418,27 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
                                                 |> Maybe.withDefault False
                                            )
                                 then
-                                    goMultiple ps es
+                                    Just <| goMultiple ps es
 
                                 else
                                     -- Names aren't a match
-                                    done False
+                                    Nothing
 
                             _ ->
                                 -- It's not worth it to try to reduce the few other cases we
                                 -- potentially could here, e.g. `let...in`, because they
                                 -- should almost never show up
-                                done False
+                                Nothing
                     )
+                |> MaybeX.orElseLazy (\() -> ignoreIfNonWrapped name)
+                |> MaybeX.withDefaultLazy (\() -> done False)
 
-        ( NamedPattern _ _, _ ) ->
+        ( NamedPattern { name } _, _ ) ->
             -- It's not worth it to try to reduce the few other cases we
             -- potentially could here, e.g. `let...in`, because they
             -- should almost never show up
-            done False
+            ignoreIfNonWrapped name
+                |> MaybeX.withDefaultLazy (\() -> done False)
 
         ( RecordPattern ps, RecordExpr es ) ->
             let
@@ -412,6 +453,7 @@ pairPatternsWithExpression lookupTable usedNames pat expr =
             { uselessPatterns = List.map (\( p, e ) -> { isUnit = False, pattern = p, expression = e }) uselessPatterns
             , usefulPatterns = usefulPatterns
             , uselessExpressions = List.map (Tuple.second << Node.value) unused
+            , ignoredPatterns = []
             }
 
         ( RecordPattern _, _ ) ->

@@ -1,5 +1,6 @@
 module NoSinglePatternCaseTest exposing (all)
 
+import Dependencies.Dependency
 import NoSinglePatternCase
     exposing
         ( andIfAsPatternRequired
@@ -15,10 +16,13 @@ import NoSinglePatternCase
         , ifCannotDestructureAtArgument
         , ifNoLetExists
         , replaceUnusedBindings
+        , reportAllCustomTypes
         , rule
         , useAsPattern
         )
+import Review.Project exposing (addDependency)
 import Review.Test
+import Review.Test.Dependencies exposing (projectWithElmCore)
 import Test exposing (Test, describe, test)
 
 
@@ -45,6 +49,7 @@ isA aOrB =
 """
                     |> Review.Test.run (rule fixInArgument)
                     |> Review.Test.expectNoErrors
+        , nonOpaqueSuite
         ]
 
 
@@ -54,6 +59,325 @@ disallowed =
         [ uselessPattern
         , fixInArgSuite
         , fixInLetSuite
+        ]
+
+
+nonOpaqueSuite : Test
+nonOpaqueSuite =
+    describe "non-opaque types"
+        [ test "does not flag by default" <|
+            \() ->
+                """module A exposing (..)
+
+type Msg = ThingieClicked
+
+update : Msg -> Int -> Int
+update msg i =
+    case msg of
+        ThingieClicked ->
+            i + 1
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectNoErrors
+        , test "does flag opaque" <|
+            \() ->
+                """module A exposing (..)
+
+type Date = Date Int
+
+update : Date -> Int -> Int
+update date i =
+    case date of
+        Date j ->
+            i + j
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "Date j"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Date = Date Int
+
+update : Date -> Int -> Int
+update (Date j) i =
+    i + j
+"""
+                        ]
+        , test "does flag type from other module" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Date = Date Int
+"""
+                , """module B exposing (..)
+
+import A
+
+update : A.Date -> Int -> Int
+update date i =
+    case date of
+        A.Date j ->
+            i + j
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (rule fixInArgument)
+                    |> Review.Test.expectErrorsForModules
+                        [ ( "B"
+                          , [ error "A.Date j"
+                                |> Review.Test.whenFixed """module B exposing (..)
+
+import A
+
+update : A.Date -> Int -> Int
+update (A.Date j) i =
+    i + j
+"""
+                            ]
+                          )
+                        ]
+        , test "does not flag non-opaque type from other module" <|
+            \() ->
+                [ """module A exposing (..)
+
+type Msg = ThingClicked
+"""
+                , """module B exposing (..)
+
+import A
+
+update : A.Msg -> Int -> Int
+update msg i =
+    case msg of
+        A.ThingClicked ->
+            i + 1
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (rule fixInArgument)
+                    |> Review.Test.expectNoErrors
+        , test "does flag wrapped type from dependency" <|
+            \() ->
+                """module A exposing (..)
+
+import Dependency exposing (Wrapped(..))
+
+update : Wrapped -> Int -> Int
+update wrapped i =
+    case wrapped of
+        Wrapped j ->
+            i + j
+"""
+                    |> Review.Test.runWithProjectData
+                        (projectWithElmCore
+                            |> addDependency Dependencies.Dependency.dependency
+                        )
+                        (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "Wrapped j"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+import Dependency exposing (Wrapped(..))
+
+update : Wrapped -> Int -> Int
+update (Wrapped j) i =
+    i + j
+"""
+                        ]
+        , test "does flag non-wrapped type from dependency" <|
+            \() ->
+                """module A exposing (..)
+
+import Dependency exposing (Msg(..))
+
+update : Msg -> Int -> Int
+update msg i =
+    case msg of
+        ThingClicked ->
+            i + 1
+"""
+                    |> Review.Test.runWithProjectData
+                        (projectWithElmCore
+                            |> addDependency Dependencies.Dependency.dependency
+                        )
+                        (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "ThingClicked"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+import Dependency exposing (Msg(..))
+
+update : Msg -> Int -> Int
+update msg i =
+    i + 1
+"""
+                        ]
+        , test "name must be exact" <|
+            \() ->
+                """module A exposing (..)
+
+type Msg1 = WrappedMsg1
+
+type Msg2 = Msg2Wrapped
+
+update : Msg1 -> Msg2 -> Int
+update msg1 msg2 i =
+    case (msg1, msg2) of
+        (WrappedMsg1, Msg2Wrapped) ->
+            0
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectNoErrors
+        , test "reduces mixed cases" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+type Msg1 = WrappedMsg1 Int
+
+type Msg2 = Msg2Wrapped Int
+
+foo : Msg1 -> Opaque -> Msg2 -> Int
+foo a b c =
+    case (a, b, c) of
+        (WrappedMsg1 i, Opaque j, Msg2Wrapped k) -> i + j + k
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "(WrappedMsg1 i, Opaque j, Msg2Wrapped k)"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+type Msg1 = WrappedMsg1 Int
+
+type Msg2 = Msg2Wrapped Int
+
+foo : Msg1 -> Opaque -> Msg2 -> Int
+foo a (Opaque j) c =
+    case (a, c) of
+        (WrappedMsg1 i, Msg2Wrapped k) ->
+            i + j + k
+"""
+                        ]
+        , test "reduces mixed cases multiline" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+type Msg1 = WrappedMsg1 Int
+
+type Msg2 = Msg2Wrapped Int
+
+foo : Msg1 -> Opaque -> Msg2 -> Int
+foo a b c =
+    case
+        ( a
+            |> foo
+            |> bar
+        , b
+        , c
+        )
+    of
+        ( WrappedMsg1 i, Opaque j, Msg2Wrapped k ) ->
+            i
+                + j
+                + k
+                |> foo
+                |> bar
+                |> baz
+"""
+                    |> Review.Test.run (rule fixInArgument)
+                    |> Review.Test.expectErrors
+                        [ error "( WrappedMsg1 i, Opaque j, Msg2Wrapped k )"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+type Msg1 = WrappedMsg1 Int
+
+type Msg2 = Msg2Wrapped Int
+
+foo : Msg1 -> Opaque -> Msg2 -> Int
+foo a (Opaque j) c =
+    case (a
+                |> foo
+                |> bar, c) of
+        (WrappedMsg1 i, Msg2Wrapped k) ->
+            i
+                    + j
+                    + k
+                    |> foo
+                    |> bar
+                    |> baz
+"""
+                        ]
+        , test "flags with setting" <|
+            \() ->
+                """module A exposing (..)
+
+type Msg = ThingieClicked
+
+update : Msg -> Int -> Int
+update msg i =
+    case msg of
+        ThingieClicked ->
+            i + 1
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> reportAllCustomTypes
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "ThingieClicked"
+                            |> Review.Test.atExactly { start = { row = 8, column = 9 }, end = { row = 8, column = 23 } }
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Msg = ThingieClicked
+
+update : Msg -> Int -> Int
+update msg i =
+    i + 1
+"""
+                        ]
+        , test "reduces all with setting" <|
+            \() ->
+                """module A exposing (..)
+
+type Opaque = Opaque Int
+
+type Msg1 = WrappedMsg1 Int
+
+type Msg2 = Msg2Wrapped Int
+
+foo : Msg1 -> Opaque -> Msg2 -> Int
+foo a b c =
+    case (a, b, c) of
+        (WrappedMsg1 i, Opaque j, Msg2Wrapped k) -> i + j + k
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> reportAllCustomTypes
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "(WrappedMsg1 i, Opaque j, Msg2Wrapped k)"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type Opaque = Opaque Int
+
+type Msg1 = WrappedMsg1 Int
+
+type Msg2 = Msg2Wrapped Int
+
+foo : Msg1 -> Opaque -> Msg2 -> Int
+foo (WrappedMsg1 i) (Opaque j) (Msg2Wrapped k) =
+    i + j + k
+"""
+                        ]
         ]
 
 
