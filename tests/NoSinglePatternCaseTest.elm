@@ -708,7 +708,7 @@ pointless b =
 """
                     |> Review.Test.run
                         (fixInArgument
-                            |> replaceUnusedBindings
+                            |> replaceUnusedBindingsWithWildcard
                             |> rule
                         )
                     |> Review.Test.expectErrors
@@ -775,7 +775,7 @@ type A = A Int
 pointless : A -> Bool
 pointless a =
     let
-        _ = a
+        (A _) = a
     in
     True
 """
