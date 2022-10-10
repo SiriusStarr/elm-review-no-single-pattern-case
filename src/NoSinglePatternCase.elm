@@ -1514,17 +1514,11 @@ movePatternToBinding { moduleContext } ( pat, { requiredAsName, binding } ) =
 {-| Remove all bindings that are in the `case...of` expression that are not used
 elsewhere else.
 -}
-fixUselessBindings : List { isUnit : Bool, binding : Binding } -> List Fix
+fixUselessBindings : List { replaceWith : String, binding : Binding } -> List Fix
 fixUselessBindings =
     List.map
-        (\{ isUnit, binding } ->
-            (if isUnit then
-                "()"
-
-             else
-                "_"
-            )
-                |> Fix.replaceRangeBy binding.patternNodeRange
+        (\{ replaceWith, binding } ->
+            Fix.replaceRangeBy binding.patternNodeRange replaceWith
         )
 
 

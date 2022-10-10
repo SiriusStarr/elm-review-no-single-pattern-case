@@ -150,7 +150,7 @@ namesUsedInExpression expr =
 
 -}
 type alias Destructuring =
-    { removableBindings : List { isUnit : Bool, binding : Binding }
+    { removableBindings : List { replaceWith : String, binding : Binding }
     , usefulPatterns : List ( Node Pattern, Node Expression )
     , removedExpressions : List (Node Expression)
     , ignoredPatterns : List ( Node Pattern, Node Expression )
@@ -493,7 +493,7 @@ pairRecordDestructuring ps es =
 {-| Given bindings in scope, a list of ignorable expressions, and a list of
 useless patterns, return any binding that are removable (not used elsewhere).
 -}
-removableBindings : Dict String Binding -> List (Node Expression) -> List { isUnit : Bool, pattern : Node Pattern, expression : Node Expression } -> List { isUnit : Bool, binding : Binding }
+removableBindings : Dict String Binding -> List (Node Expression) -> List { replaceWith : String, pattern : Node Pattern, expression : Node Expression } -> List { replaceWith : String, binding : Binding }
 removableBindings bindings allUselessExpressions =
     List.concatMap
         (\r ->
@@ -505,7 +505,7 @@ removableBindings bindings allUselessExpressions =
                             && (countUsesIn scope name == List.foldl (\e acc -> acc + countUsesIn e name) 0 allUselessExpressions)
                     )
                 |> Dict.values
-                |> List.map (\b -> { isUnit = r.isUnit, binding = b })
+                |> List.map (\b -> { replaceWith = r.replaceWith, binding = b })
         )
 
 
