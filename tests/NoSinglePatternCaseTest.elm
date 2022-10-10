@@ -16,6 +16,7 @@ import NoSinglePatternCase
         , ifCannotDestructureAtArgument
         , ifNoLetExists
         , replaceUnusedBindings
+        , replaceUnusedBindingsWithWildcard
         , reportAllCustomTypes
         , rule
         , useAsPattern
@@ -519,6 +520,35 @@ pointless () =
     True
 """
                         ]
+        , test "constructor no args" <|
+            \() ->
+                """module A exposing (..)
+
+type CreateNewLet = CreateNewLet
+
+pointless : CreateNewLet -> Bool
+pointless a =
+    case a of
+        CreateNewLet ->
+            foo
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "CreateNewLet"
+                            |> Review.Test.atExactly { start = { row = 8, column = 9 }, end = { row = 8, column = 21 } }
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type CreateNewLet = CreateNewLet
+
+pointless : CreateNewLet -> Bool
+pointless CreateNewLet =
+    foo
+"""
+                        ]
         , test "complex pattern" <|
             \() ->
                 """module A exposing (..)
@@ -565,11 +595,69 @@ pointless a =
 type A = A Int
 
 pointless : A -> Bool
+pointless (A _) =
+    True
+"""
+                        ]
+        , test "single custom type with wildcard option" <|
+            \() ->
+                """module A exposing (..)
+
+type A = A Int
+
+pointless : A -> Bool
+pointless a =
+    case a of
+        A int -> True
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindingsWithWildcard
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "A int"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type A = A Int
+
+pointless : A -> Bool
 pointless _ =
     True
 """
                         ]
         , test "nested custom types" <|
+            \() ->
+                """module A exposing (..)
+
+type A = A Int
+
+type B = B A A
+
+pointless : B -> Bool
+pointless b =
+    case b of
+        B (A i1) (A i2) -> True
+"""
+                    |> Review.Test.run
+                        (fixInArgument
+                            |> replaceUnusedBindings
+                            |> rule
+                        )
+                    |> Review.Test.expectErrors
+                        [ error "B (A i1) (A i2)"
+                            |> Review.Test.whenFixed """module A exposing (..)
+
+type A = A Int
+
+type B = B A A
+
+pointless : B -> Bool
+pointless (B (A _) (A _)) =
+    True
+"""
+                        ]
+        , test "nested custom types with wildcard option" <|
             \() ->
                 """module A exposing (..)
 
