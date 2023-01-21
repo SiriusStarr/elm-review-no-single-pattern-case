@@ -175,6 +175,7 @@ rule config =
             , foldProjectContexts = foldProjectContexts
             }
         |> Rule.withContextFromImportedModules
+        |> Rule.providesFixesForProjectRule
         |> Rule.fromProjectRuleSchema
 
 
