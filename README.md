@@ -4,7 +4,7 @@ Provides [`elm-review`](https://package.elm-lang.org/packages/jfmengels/elm-revi
 
 ## Provided rules
 
-* [🔧 `NoSinglePatternCase`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/2.1.0/NoSinglePatternCase/) - Reports `case...of` expressions that match only a single pattern.  Such case expressions typically are either unnecessary or may be written more concisely.
+* [🔧 `NoSinglePatternCase`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/2.1.1/NoSinglePatternCase/) - Reports `case...of` expressions that match only a single pattern.  Such case expressions typically are either unnecessary or may be written more concisely.
 
 ## Configuration
 
@@ -31,6 +31,7 @@ elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example/fix-
 
 ## Changelog
 
+* `2.1.1` -- Bump `elm-review` to v2.11.1 and mark rule as providing fixes.
 * `2.1.0`
   * **New features:**
     * ✨ Non-wrapped types are **now ignored by default**.  By default, only
@@ -73,7 +74,7 @@ elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example/fix-
       ```
 
       To revert to version `2.0.2` behavior and before, use
-      [`reportAllCustomTypes`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/2.1.0/NoSinglePatternCase/#reportAllCustomTypes)
+      [`reportAllCustomTypes`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/2.1.1/NoSinglePatternCase/#reportAllCustomTypes)
     * ✨ `replaceUnusedBindings` now replaces bindings with more specific patterns.  For example,
 
       ```elm
@@ -108,7 +109,7 @@ elm-review --template SiriusStarr/elm-review-no-single-pattern-case/example/fix-
       ```
 
       as valid Elm (even though it is), you can use
-      [`replaceUnusedBindingsWithWildcard`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/2.1.0/NoSinglePatternCase/#replaceUnusedBindingsWithWildcard)
+      [`replaceUnusedBindingsWithWildcard`](https://package.elm-lang.org/packages/SiriusStarr/elm-review-no-single-pattern-case/2.1.1/NoSinglePatternCase/#replaceUnusedBindingsWithWildcard)
       to revert to version `2.0.2` behavior and before.
 
 * `2.0.2`
