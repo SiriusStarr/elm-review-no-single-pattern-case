@@ -58,8 +58,7 @@ import Dict exposing (Dict)
 import Elm.Syntax.Declaration exposing (Declaration(..))
 import Elm.Syntax.Exposing exposing (Exposing(..), TopLevelExpose(..))
 import Elm.Syntax.Expression exposing (Expression(..), LetBlock, LetDeclaration(..))
-import Elm.Syntax.File exposing (File)
-import Elm.Syntax.Module as Module
+import Elm.Syntax.Module as Module exposing (Module)
 import Elm.Syntax.ModuleName exposing (ModuleName)
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern)
@@ -251,11 +250,11 @@ fromModuleToProject =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\extractSourceCode lookupTable fileIsIgnored ast projectContext ->
+        (\extractSourceCode lookupTable fileIsIgnored { moduleDefinition } projectContext ->
             { extractSourceCode = extractSourceCode
             , lookupTable = lookupTable
             , fileIsIgnored = fileIsIgnored
-            , exposedTypes = getExposedTypes ast
+            , exposedTypes = getExposedTypes <| Node.value moduleDefinition
             , exposedNonWrappedTypes = Set.empty
             , nonWrappedTypes = projectContext.nonWrappedTypes
             }
@@ -278,8 +277,8 @@ foldProjectContexts newContext prevContext =
 {-| Get a set of all types with exposed constructors or `Nothing` if everything
 is exposed.
 -}
-getExposedTypes : File -> Maybe (Set String)
-getExposedTypes { moduleDefinition } =
+getExposedTypes : Module -> Maybe (Set String)
+getExposedTypes =
     let
         keepTypesWithExposedConstructors : Node TopLevelExpose -> Maybe String
         keepTypesWithExposedConstructors e =
@@ -290,9 +289,8 @@ getExposedTypes { moduleDefinition } =
                 _ ->
                     Nothing
     in
-    Node.value moduleDefinition
-        |> Module.exposingList
-        |> (\l ->
+    Module.exposingList
+        >> (\l ->
                 case l of
                     All _ ->
                         Nothing
