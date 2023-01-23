@@ -56,7 +56,10 @@ sake of annotation, should it be necessary.
 
 import Dict exposing (Dict)
 import Elm.Syntax.Declaration exposing (Declaration(..))
+import Elm.Syntax.Exposing exposing (Exposing(..), TopLevelExpose(..))
 import Elm.Syntax.Expression exposing (Expression(..), LetBlock, LetDeclaration(..))
+import Elm.Syntax.File exposing (File)
+import Elm.Syntax.Module as Module
 import Elm.Syntax.ModuleName exposing (ModuleName)
 import Elm.Syntax.Node as Node exposing (Node)
 import Elm.Syntax.Pattern exposing (Pattern)
@@ -180,11 +183,23 @@ rule config =
 
 
 {-| Module context for the rule.
+
+  - `extractSourceCode` -- Source extractor for fixes
+  - `lookupTable` -- Module name lookup table
+  - `fileIsIgnored` -- Whether file should not be checked for errors
+  - `exposedTypes` -- Custom types whose constructors are exposed (as only these
+    will need to be added to project context)
+  - `exposedNonWrappedTypes` -- All constructors that are not wrapped types that
+    are exposed from local module.
+  - `nonWrappedTypes` -- Constructors that are not wrapped types.
+
 -}
 type alias ModuleContext =
     { extractSourceCode : Range -> String
     , lookupTable : ModuleNameLookupTable
     , fileIsIgnored : Bool
+    , exposedTypes : Maybe (Set String)
+    , exposedNonWrappedTypes : Set String
     , nonWrappedTypes : Dict ModuleName (Set String)
     }
 
@@ -226,12 +241,7 @@ fromModuleToProject : Rule.ContextCreator ModuleContext ProjectContext
 fromModuleToProject =
     Rule.initContextCreator
         (\moduleName moduleContext ->
-            { nonWrappedTypes =
-                moduleContext.nonWrappedTypes
-                    |> Dict.get []
-                    |> Maybe.withDefault Set.empty
-                    |> Dict.singleton moduleName
-            }
+            { nonWrappedTypes = Dict.singleton moduleName moduleContext.exposedNonWrappedTypes }
         )
         |> Rule.withModuleName
 
@@ -241,16 +251,19 @@ fromModuleToProject =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\extractSourceCode lookupTable fileIsIgnored projectContext ->
+        (\extractSourceCode lookupTable fileIsIgnored ast projectContext ->
             { extractSourceCode = extractSourceCode
             , lookupTable = lookupTable
             , fileIsIgnored = fileIsIgnored
+            , exposedTypes = getExposedTypes ast
+            , exposedNonWrappedTypes = Set.empty
             , nonWrappedTypes = projectContext.nonWrappedTypes
             }
         )
         |> Rule.withSourceCodeExtractor
         |> Rule.withModuleNameLookupTable
         |> Rule.withIsFileIgnored
+        |> Rule.withFullAst
 
 
 {-| Combine `ProjectContext`s.
@@ -262,12 +275,41 @@ foldProjectContexts newContext prevContext =
     }
 
 
+{-| Get a set of all types with exposed constructors or `Nothing` if everything
+is exposed.
+-}
+getExposedTypes : File -> Maybe (Set String)
+getExposedTypes { moduleDefinition } =
+    let
+        keepTypesWithExposedConstructors : Node TopLevelExpose -> Maybe String
+        keepTypesWithExposedConstructors e =
+            case Node.value e of
+                TypeExpose { name } ->
+                    Just name
+
+                _ ->
+                    Nothing
+    in
+    Node.value moduleDefinition
+        |> Module.exposingList
+        |> (\l ->
+                case l of
+                    All _ ->
+                        Nothing
+
+                    Explicit es ->
+                        List.filterMap keepTypesWithExposedConstructors es
+                            |> Set.fromList
+                            |> Just
+           )
+
+
 {-| Visit declarations, storing any types that should not be reduced.
 -}
 declarationListVisitor : Config fixBy -> List (Node Declaration) -> ModuleContext -> ModuleContext
 declarationListVisitor (Config { reportAllTypes }) declarations context =
     let
-        getNonWrappedType : Node Declaration -> Maybe String
+        getNonWrappedType : Node Declaration -> Maybe ( String, Bool )
         getNonWrappedType node =
             case Node.value node of
                 CustomTypeDeclaration { name, constructors } ->
@@ -277,9 +319,13 @@ declarationListVisitor (Config { reportAllTypes }) declarations context =
                                 n : String
                                 n =
                                     Node.value (Node.value c).name
+
+                                typeName : String
+                                typeName =
+                                    Node.value name
                             in
-                            if n /= Node.value name then
-                                Just n
+                            if n /= typeName then
+                                Just ( n, MaybeX.unwrap True (Set.member typeName) context.exposedTypes )
 
                             else
                                 Nothing
@@ -297,17 +343,24 @@ declarationListVisitor (Config { reportAllTypes }) declarations context =
 
     else
         -- Find non-wrapped custom types that were defined in the module, and store them in the context.
-        { context
-            | nonWrappedTypes =
-                List.filterMap getNonWrappedType declarations
-                    |> (\ts ->
-                            if List.isEmpty ts then
-                                context.nonWrappedTypes
+        List.filterMap getNonWrappedType declarations
+            |> (\cs ->
+                    { context
+                        | exposedNonWrappedTypes =
+                            List.filterMap
+                                (\( c, exposed ) ->
+                                    if exposed then
+                                        Just c
 
-                            else
-                                Dict.insert [] (Set.fromList ts) context.nonWrappedTypes
-                       )
-        }
+                                    else
+                                        Nothing
+                                )
+                                cs
+                                |> Set.fromList
+                        , nonWrappedTypes =
+                            Dict.insert [] (Set.fromList <| List.map Tuple.first cs) context.nonWrappedTypes
+                    }
+               )
 
 
 {-| Configure the rule, determining how automatic fixes are generated.
