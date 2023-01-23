@@ -184,6 +184,7 @@ rule config =
 type alias ModuleContext =
     { extractSourceCode : Range -> String
     , lookupTable : ModuleNameLookupTable
+    , fileIsIgnored : Bool
     , nonWrappedTypes : Dict ModuleName (Set String)
     }
 
@@ -209,7 +210,14 @@ moduleVisitor : Config fixBy -> Rule.ModuleRuleSchema {} ModuleContext -> Rule.M
 moduleVisitor config schema =
     schema
         |> Rule.withDeclarationListVisitor (\ds c -> ( [], declarationListVisitor config ds c ))
-        |> Rule.withDeclarationEnterVisitor (checkDeclaration config)
+        |> Rule.withDeclarationEnterVisitor
+            (\d c ->
+                if c.fileIsIgnored then
+                    ( [], c )
+
+                else
+                    ( checkDeclaration config d c, c )
+            )
 
 
 {-| Create a `ProjectContext` from a `ModuleContext`.
@@ -233,14 +241,16 @@ fromModuleToProject =
 fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
 fromProjectToModule =
     Rule.initContextCreator
-        (\extractSourceCode lookupTable projectContext ->
+        (\extractSourceCode lookupTable fileIsIgnored projectContext ->
             { extractSourceCode = extractSourceCode
             , lookupTable = lookupTable
+            , fileIsIgnored = fileIsIgnored
             , nonWrappedTypes = projectContext.nonWrappedTypes
             }
         )
         |> Rule.withSourceCodeExtractor
         |> Rule.withModuleNameLookupTable
+        |> Rule.withIsFileIgnored
 
 
 {-| Combine `ProjectContext`s.
@@ -992,9 +1002,9 @@ type alias Either a b =
 
 {-| Check a TLD for single-pattern cases.
 -}
-checkDeclaration : Config fixBy -> Node Declaration -> ModuleContext -> ( List (Error {}), ModuleContext )
+checkDeclaration : Config fixBy -> Node Declaration -> ModuleContext -> List (Error {})
 checkDeclaration config d context =
-    ( case Node.value d of
+    case Node.value d of
         FunctionDeclaration { declaration } ->
             let
                 { expression, arguments } =
@@ -1012,8 +1022,6 @@ checkDeclaration config d context =
 
         _ ->
             []
-    , context
-    )
 
 
 {-| The local context in which a single-pattern case exists.
