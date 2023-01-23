@@ -139,7 +139,7 @@ update (A.Date j) i =
                         ]
         , test "does not flag non-opaque type from other module" <|
             \() ->
-                [ """module A exposing (..)
+                [ """module A exposing (Msg(..))
 
 type Msg = ThingClicked
 """
@@ -155,6 +155,56 @@ update msg i =
 """
                 ]
                     |> Review.Test.runOnModules
+                        (rule fixInArgument)
+                    |> Review.Test.expectNoErrors
+        , test "does flag non-opaque type from other module that is not exported (this just tests context, since it's a compile error)" <|
+            \() ->
+                [ """module A exposing ()
+
+type Msg = ThingClicked
+"""
+                , """module B exposing (..)
+
+import A
+
+update : A.Msg -> Int -> Int
+update msg i =
+    case msg of
+        A.ThingClicked ->
+            i + 1
+"""
+                ]
+                    |> Review.Test.runOnModules
+                        (rule fixInArgument)
+                    |> Review.Test.expectErrorsForModules
+                        [ ( "B"
+                          , [ error "A.ThingClicked"
+                                |> Review.Test.whenFixed """module B exposing (..)
+
+import A
+
+update : A.Msg -> Int -> Int
+update msg i =
+    i + 1
+"""
+                            ]
+                          )
+                        ]
+        , test "does not flag non-opaque type from same module that is not exported" <|
+            \() ->
+                """module B exposing (update)
+
+import A
+
+type Msg = ThingClicked
+
+update : A.Msg -> Int -> Int
+update msg i =
+    case msg of
+        ThingClicked ->
+            i + 1
+"""
+                    |> Review.Test.run
                         (rule fixInArgument)
                     |> Review.Test.expectNoErrors
         , test "does flag wrapped type from dependency" <|
