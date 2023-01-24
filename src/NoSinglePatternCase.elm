@@ -237,8 +237,14 @@ moduleVisitor config schema =
 fromModuleToProject : Rule.ContextCreator ModuleContext ProjectContext
 fromModuleToProject =
     Rule.initContextCreator
-        (\moduleName moduleContext ->
-            { nonWrappedTypes = Dict.singleton moduleName moduleContext.exposedNonWrappedTypes }
+        (\moduleName { exposedNonWrappedTypes } ->
+            { nonWrappedTypes =
+                if Set.isEmpty exposedNonWrappedTypes then
+                    Dict.empty
+
+                else
+                    Dict.singleton moduleName exposedNonWrappedTypes
+            }
         )
         |> Rule.withModuleName
 
