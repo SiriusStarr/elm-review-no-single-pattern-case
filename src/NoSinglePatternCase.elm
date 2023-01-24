@@ -222,11 +222,13 @@ moduleVisitor config schema =
     schema
         |> Rule.withDeclarationEnterVisitor
             (\d c ->
-                if c.fileIsIgnored then
-                    ( [], c )
+                ( if c.fileIsIgnored then
+                    []
 
-                else
-                    ( checkDeclaration config d c, c )
+                  else
+                    checkDeclaration config d c
+                , c
+                )
             )
 
 
