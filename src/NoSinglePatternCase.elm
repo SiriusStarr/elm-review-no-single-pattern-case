@@ -186,8 +186,6 @@ rule config =
   - `extractSourceCode` -- Source extractor for fixes
   - `lookupTable` -- Module name lookup table
   - `fileIsIgnored` -- Whether file should not be checked for errors
-  - `exposedTypes` -- Custom types whose constructors are exposed (as only these
-    will need to be added to project context)
   - `exposedNonWrappedTypes` -- All constructors that are not wrapped types that
     are exposed from local module.
   - `nonWrappedTypes` -- Constructors that are not wrapped types.
@@ -197,7 +195,6 @@ type alias ModuleContext =
     { extractSourceCode : Range -> String
     , lookupTable : ModuleNameLookupTable
     , fileIsIgnored : Bool
-    , exposedTypes : Maybe (Set String)
     , exposedNonWrappedTypes : Set String
     , nonWrappedTypes : Dict ModuleName (Set String)
     }
@@ -251,10 +248,6 @@ fromProjectToModule (Config { reportAllTypes }) =
     Rule.initContextCreator
         (\extractSourceCode lookupTable fileIsIgnored { moduleDefinition, declarations } projectContext ->
             let
-                exposedTypes : Maybe (Set String)
-                exposedTypes =
-                    getExposedTypes <| Node.value moduleDefinition
-
                 { exposedNonWrappedTypes, nonWrappedTypes } =
                     if reportAllTypes then
                         -- Don't store any if we're reporting everything
@@ -264,14 +257,13 @@ fromProjectToModule (Config { reportAllTypes }) =
 
                     else
                         declarationListVisitor declarations
-                            { exposedTypes = exposedTypes
+                            { exposedTypes = getExposedTypes <| Node.value moduleDefinition
                             , nonWrappedTypes = projectContext.nonWrappedTypes
                             }
             in
             { extractSourceCode = extractSourceCode
             , lookupTable = lookupTable
             , fileIsIgnored = fileIsIgnored
-            , exposedTypes = exposedTypes
             , exposedNonWrappedTypes = exposedNonWrappedTypes
             , nonWrappedTypes = nonWrappedTypes
             }
