@@ -172,7 +172,7 @@ rule config =
     Rule.newProjectRuleSchema "NoSinglePatternCase" initialContext
         |> Rule.withModuleVisitor (moduleVisitor config)
         |> Rule.withModuleContextUsingContextCreator
-            { fromProjectToModule = fromProjectToModule
+            { fromProjectToModule = fromProjectToModule config
             , fromModuleToProject = fromModuleToProject
             , foldProjectContexts = foldProjectContexts
             }
@@ -223,7 +223,6 @@ checking all for `case`s.
 moduleVisitor : Config fixBy -> Rule.ModuleRuleSchema {} ModuleContext -> Rule.ModuleRuleSchema { hasAtLeastOneVisitor : () } ModuleContext
 moduleVisitor config schema =
     schema
-        |> Rule.withDeclarationListVisitor (\ds c -> ( [], declarationListVisitor config ds c ))
         |> Rule.withDeclarationEnterVisitor
             (\d c ->
                 if c.fileIsIgnored then
@@ -247,16 +246,34 @@ fromModuleToProject =
 
 {-| Create a `ModuleContext` from a `ProjectContext`.
 -}
-fromProjectToModule : Rule.ContextCreator ProjectContext ModuleContext
-fromProjectToModule =
+fromProjectToModule : Config fixBy -> Rule.ContextCreator ProjectContext ModuleContext
+fromProjectToModule (Config { reportAllTypes }) =
     Rule.initContextCreator
-        (\extractSourceCode lookupTable fileIsIgnored { moduleDefinition } projectContext ->
+        (\extractSourceCode lookupTable fileIsIgnored { moduleDefinition, declarations } projectContext ->
+            let
+                exposedTypes : Maybe (Set String)
+                exposedTypes =
+                    getExposedTypes <| Node.value moduleDefinition
+
+                { exposedNonWrappedTypes, nonWrappedTypes } =
+                    if reportAllTypes then
+                        -- Don't store any if we're reporting everything
+                        { exposedNonWrappedTypes = Set.empty
+                        , nonWrappedTypes = projectContext.nonWrappedTypes
+                        }
+
+                    else
+                        declarationListVisitor declarations
+                            { exposedTypes = exposedTypes
+                            , nonWrappedTypes = projectContext.nonWrappedTypes
+                            }
+            in
             { extractSourceCode = extractSourceCode
             , lookupTable = lookupTable
             , fileIsIgnored = fileIsIgnored
-            , exposedTypes = getExposedTypes <| Node.value moduleDefinition
-            , exposedNonWrappedTypes = Set.empty
-            , nonWrappedTypes = projectContext.nonWrappedTypes
+            , exposedTypes = exposedTypes
+            , exposedNonWrappedTypes = exposedNonWrappedTypes
+            , nonWrappedTypes = nonWrappedTypes
             }
         )
         |> Rule.withSourceCodeExtractor
@@ -304,8 +321,17 @@ getExposedTypes =
 
 {-| Visit declarations, storing any types that should not be reduced.
 -}
-declarationListVisitor : Config fixBy -> List (Node Declaration) -> ModuleContext -> ModuleContext
-declarationListVisitor (Config { reportAllTypes }) declarations context =
+declarationListVisitor :
+    List (Node Declaration)
+    ->
+        { exposedTypes : Maybe (Set String)
+        , nonWrappedTypes : Dict ModuleName (Set String)
+        }
+    ->
+        { exposedNonWrappedTypes : Set String
+        , nonWrappedTypes : Dict ModuleName (Set String)
+        }
+declarationListVisitor declarations { exposedTypes, nonWrappedTypes } =
     let
         getNonWrappedType : Node Declaration -> Maybe ( String, Bool )
         getNonWrappedType node =
@@ -323,7 +349,7 @@ declarationListVisitor (Config { reportAllTypes }) declarations context =
                                     Node.value name
                             in
                             if n /= typeName then
-                                Just ( n, MaybeX.unwrap True (Set.member typeName) context.exposedTypes )
+                                Just ( n, MaybeX.unwrap True (Set.member typeName) exposedTypes )
 
                             else
                                 Nothing
@@ -335,30 +361,24 @@ declarationListVisitor (Config { reportAllTypes }) declarations context =
                 _ ->
                     Nothing
     in
-    if reportAllTypes then
-        -- Don't store any if we're reporting everything
-        context
+    -- Find non-wrapped custom types that were defined in the module, and store them in the context.
+    List.filterMap getNonWrappedType declarations
+        |> (\cs ->
+                { exposedNonWrappedTypes =
+                    List.filterMap
+                        (\( c, exposed ) ->
+                            if exposed then
+                                Just c
 
-    else
-        -- Find non-wrapped custom types that were defined in the module, and store them in the context.
-        List.filterMap getNonWrappedType declarations
-            |> (\cs ->
-                    { context
-                        | exposedNonWrappedTypes =
-                            List.filterMap
-                                (\( c, exposed ) ->
-                                    if exposed then
-                                        Just c
-
-                                    else
-                                        Nothing
-                                )
-                                cs
-                                |> Set.fromList
-                        , nonWrappedTypes =
-                            Dict.insert [] (Set.fromList <| List.map Tuple.first cs) context.nonWrappedTypes
-                    }
-               )
+                            else
+                                Nothing
+                        )
+                        cs
+                        |> Set.fromList
+                , nonWrappedTypes =
+                    Dict.insert [] (Set.fromList <| List.map Tuple.first cs) nonWrappedTypes
+                }
+           )
 
 
 {-| Configure the rule, determining how automatic fixes are generated.
