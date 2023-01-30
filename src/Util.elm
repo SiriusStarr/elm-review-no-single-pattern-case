@@ -290,6 +290,18 @@ pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
         isUseful p =
             namesInPattern p
                 |> List.any (\( name, _ ) -> Set.member name usedNames)
+
+        getFunctionName : Node Expression -> Maybe String
+        getFunctionName e =
+            case Node.value e of
+                FunctionOrValue _ name ->
+                    Just name
+
+                _ ->
+                    -- It's not worth it to try to reduce the few other cases we
+                    -- potentially could here, e.g. `let...in`, because they
+                    -- should almost never show up
+                    Nothing
     in
     case ( Node.value pat, Node.value expr ) of
         ( ParenthesizedPattern p, _ ) ->
@@ -410,28 +422,24 @@ pairPatternsWithExpression lookupTable nonWrappedTypes usedNames pat expr =
             ListX.uncons exprs
                 |> Maybe.andThen
                     (\( e, es ) ->
-                        case Node.value e of
-                            FunctionOrValue _ eName ->
-                                if
-                                    -- Confirm they are the same name and from the same module
-                                    (name == eName)
-                                        && (Maybe.map2 (==)
-                                                (ModuleNameLookupTable.moduleNameFor lookupTable pat)
-                                                (ModuleNameLookupTable.moduleNameFor lookupTable e)
-                                                |> Maybe.withDefault False
-                                           )
-                                then
-                                    Just <| goMultiple ps es
+                        getFunctionName e
+                            |> Maybe.andThen
+                                (\eName ->
+                                    if
+                                        -- Confirm they are the same name and from the same module
+                                        (name == eName)
+                                            && (Maybe.map2 (==)
+                                                    (ModuleNameLookupTable.moduleNameFor lookupTable pat)
+                                                    (ModuleNameLookupTable.moduleNameFor lookupTable e)
+                                                    |> Maybe.withDefault False
+                                               )
+                                    then
+                                        Just <| goMultiple ps es
 
-                                else
-                                    -- Names aren't a match
-                                    Nothing
-
-                            _ ->
-                                -- It's not worth it to try to reduce the few other cases we
-                                -- potentially could here, e.g. `let...in`, because they
-                                -- should almost never show up
-                                Nothing
+                                    else
+                                        -- Names aren't a match
+                                        Nothing
+                                )
                     )
                 |> MaybeX.orElseLazy (\() -> ignoreIfNonWrapped name)
                 |> MaybeX.withDefaultLazy done
