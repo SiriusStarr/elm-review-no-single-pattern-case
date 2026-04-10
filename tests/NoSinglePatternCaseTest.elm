@@ -159,9 +159,11 @@ update msg i =
                     |> Review.Test.expectNoErrors
         , test "does flag non-opaque type from other module that is not exported (this just tests context, since it's a compile error)" <|
             \() ->
-                [ """module A exposing ()
+                [ """module A exposing (placeholder)
 
 type Msg = ThingClicked
+
+placeholder = 0
 """
                 , """module B exposing (..)
 
