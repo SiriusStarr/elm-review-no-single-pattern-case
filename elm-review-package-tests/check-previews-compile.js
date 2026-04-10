@@ -1,17 +1,22 @@
 #!/usr/bin/env node
 
-const path = require('path');
-const Ansi = require('./helpers/ansi');
-const {execSync} = require('child_process');
-const {findPreviewConfigurations} = require('./helpers/find-configurations');
+const path = require('node:path');
+const {execSync} = require('node:child_process');
 const packageDependencies = require('../elm.json').dependencies;
+const Ansi = require('./helpers/ansi');
+const {findPreviewConfigurations} = require('./helpers/find-configurations');
 
 const root = path.dirname(__dirname);
 
 // Find all elm.json files
+for (const example of findPreviewConfigurations()) {
+  checkThatExampleCompiles(example);
+}
 
-findPreviewConfigurations().forEach(checkThatExampleCompiles);
-
+/**
+ * @param {string} exampleConfiguration
+ * @returns {void}
+ */
 function checkThatExampleCompiles(exampleConfiguration) {
   const exampleConfigurationElmJson = require(`${exampleConfiguration}/elm.json`);
 
@@ -48,7 +53,6 @@ and make the necessary changes to make it compile.`
       }
 
       success(exampleConfiguration);
-      return;
     } catch {
       console.log(
         `An error occurred while trying to check whether the ${Ansi.yellow(
@@ -61,12 +65,21 @@ and make the necessary changes to make it compile.`
   }
 }
 
+/**
+ * @param {string} config
+ * @returns {void}
+ */
 function success(config) {
   console.log(`${Ansi.green('✔')} ${path.relative(root, config)}/ compiles`);
 }
 
+/**
+ * @param {string} exampleConfiguration
+ * @param {Record<string, string>} previewDependencies
+ * @returns {void}
+ */
 function checkDepsAreCompatible(exampleConfiguration, previewDependencies) {
-  Object.entries(packageDependencies).forEach(([depName, constraint]) => {
+  for (const [depName, constraint] of Object.entries(packageDependencies)) {
     if (!(depName in previewDependencies)) {
       console.error(
         `Dependency ${depName} is missing in the ${exampleConfiguration}/ configuration`
@@ -81,17 +94,26 @@ function checkDepsAreCompatible(exampleConfiguration, previewDependencies) {
       previewDependencies[depName]
     );
     delete previewDependencies[depName];
-  });
+  }
 
   const remainingKeys = Object.keys(previewDependencies);
-  if (remainingKeys.length !== 0) {
+  if (remainingKeys.length > 0) {
+    const extraneousDependencies = remainingKeys.join(', ');
+
     console.error(
-      `There are extraneous dependencies in the ${exampleConfiguration}/ configuration: ${remainingKeys}`
+      `There are extraneous dependencies in the ${exampleConfiguration}/ configuration: ${extraneousDependencies}`
     );
     process.exit(1);
   }
 }
 
+/**
+ * @param {string} exampleConfiguration
+ * @param {string} depName
+ * @param {string} constraint
+ * @param {string} version
+ * @returns {void}
+ */
 function checkConstraint(exampleConfiguration, depName, constraint, version) {
   const [minVersion] = constraint.split(' <= v < ').map(splitVersion);
   const previewVersion = splitVersion(version);
@@ -108,6 +130,10 @@ function checkConstraint(exampleConfiguration, depName, constraint, version) {
   }
 }
 
+/**
+ * @param {string} version
+ * @returns {number[]}
+ */
 function splitVersion(version) {
   return version.split('.').map((n) => Number.parseInt(n, 10));
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const path = require('path');
+const path = require('node:path');
 const fs = require('fs-extra');
 const root = path.resolve(__dirname, '..');
 const packageElmJson = require(`${root}/elm.json`);
@@ -16,21 +16,49 @@ if (require.main === module) {
 
 // Find all elm.json files
 
+/**
+ * @typedef {object} ApplicationElmJson
+ * @property {string[]} source-directories
+ * @property {DependencyList} dependencies
+ */
+
+/**
+ * @typedef {object} DependencyList
+ * @property {Record<string, string>} direct
+ * @property {Record<string, string>} indirect
+ */
+
+/**
+ * @returns {void}
+ */
 function copyPreviewsToExamples() {
   const previewFolders = findPreviewConfigurations();
-  previewFolders.forEach(copyPreviewToExample);
+  for (const folder of previewFolders) {
+    copyPreviewToExample(folder);
+  }
 }
 
+/**
+ * @param {string} pathToPreviewFolder
+ * @returns {void}
+ */
 function copyPreviewToExample(pathToPreviewFolder) {
   const pathToExampleFolder = `${pathToPreviewFolder}/`.replace(
     /preview/g,
     'example'
   );
-  fs.removeSync(pathToExampleFolder);
+
+  fs.rmSync(pathToExampleFolder, {
+    recursive: true,
+    force: true,
+    maxRetries: 10
+  });
   fs.copySync(pathToPreviewFolder, pathToExampleFolder, {overwrite: true});
 
   const pathToElmJson = path.resolve(pathToExampleFolder, 'elm.json');
-  const elmJson = fs.readJsonSync(pathToElmJson);
+  const elmJson = /** @type {ApplicationElmJson} */ (
+    fs.readJsonSync(pathToElmJson)
+  );
 
   // Remove the source directory pointing to the package's src/
   elmJson['source-directories'] = elmJson['source-directories'].filter(
