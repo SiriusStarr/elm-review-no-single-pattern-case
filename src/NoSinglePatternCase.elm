@@ -1808,7 +1808,7 @@ getValidLetBlock { context, destructuring, outputExpression } ps =
                                 Nothing
 
                             else
-                                Just <| Tuple.pair letBlock has
+                                Just ( letBlock, has )
                         , lacksValidLet = lacks
                         }
                    )
